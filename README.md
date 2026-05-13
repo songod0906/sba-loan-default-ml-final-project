@@ -1,10 +1,8 @@
 # SBA Loan Default Modeling
 
-This project builds a loan approval decision workflow using default probability and validation net profit.
-
 ## Dataset
 
-`SBAnational.csv` is required locally to run the workflow, but it is not included in GitHub because it is a data file.
+`SBAnational.csv`
 
 ## Files
 
@@ -14,11 +12,15 @@ This project builds a loan approval decision workflow using default probability 
 
 ## How to Run
 
-1. Put `SBAnational.csv` in the project folder locally.
-2. Open `Main Workflow.py` in Spyder, VS Code, or your preferred IDE.
-3. Run setup blocks first.
-4. Each teammate works only in their assigned sections.
-5. Do not run final test until the team freezes features, model, hyperparameters, and threshold.
+1. Clone repo.
+2. Create your branch from main.
+3. Run Blocks 1–13 first.
+4. Do Part 1 EDA in your assigned section.
+5. Do Part 2 model work in your assigned model section.
+6. Save your best result table/screenshot.
+7. Commit and push.
+8. Open a pull request.
+9. Do not run final test set yet guys. 
 
 ## Team Workflow
 
