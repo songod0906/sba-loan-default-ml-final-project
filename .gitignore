@@ -1,0 +1,32 @@
+# Data files
+*.csv
+*.xlsx
+*.xls
+*.parquet
+data/
+
+# Model artifacts and binary arrays
+*.pkl
+*.joblib
+*.npy
+*.npz
+models/
+artifacts/
+
+# Generated outputs and logs
+outputs/
+logs/
+
+# Local environment and secrets
+.env
+.venv/
+venv/
+env/
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# Notebook and OS metadata
+.ipynb_checkpoints/
+.DS_Store
