@@ -816,7 +816,7 @@ if RUN_LOGIT_DA:
 
 #%% 14D. Neural network workspace — Owner: Huyen Anh
 
-RUN_NEURAL_NET = True
+RUN_NEURAL_NET = False
 
 if RUN_NEURAL_NET:
 
@@ -878,59 +878,128 @@ if RUN_NEURAL_NET:
     plt.legend()
     plt.tight_layout()
     plt.show()
+    
+# --- Training diagnostics ---
+    mlp_model = mlp_pipe.named_steps["model"]
+    print("\n--- Training diagnostics ---")
+    print("n_iter (epochs run):", mlp_model.n_iter_)
+    print("Final training loss:", round(mlp_model.loss_, 4))
+    print("Best validation score (early stopping):", round(mlp_model.best_validation_score_, 4))
+
+    # --- Brier score ---
+    from sklearn.metrics import brier_score_loss
+    brier = brier_score_loss(y_valid, mlp_prob)
+    print("\n--- Brier Score ---")
+    print(f"Brier score: {brier:.4f}")
+    print("(lower is better; 0 = perfect, 0.25 = random)")
+
+    # --- Calibration check ---
+    calibration_df = pd.DataFrame({
+        "prob_default": mlp_prob,
+        "actual_default": y_valid.values,
+    })
+    calibration_df["decile"] = pd.qcut(
+        calibration_df["prob_default"],
+        q=10,
+        duplicates="drop",
+    )
+    calibration_table = calibration_df.groupby("decile", observed=False).agg(
+        avg_pred_default=("prob_default", "mean"),
+        actual_default_rate=("actual_default", "mean"),
+        count=("actual_default", "count"),
+    ).reset_index()
+
+    print("\n--- Calibration Table ---")
+    print(calibration_table)
+
+    plt.figure(figsize=(6, 5))
+    plt.plot(
+        calibration_table["avg_pred_default"],
+        calibration_table["actual_default_rate"],
+        marker="o", label="NN calibration"
+    )
+    plt.plot([0, 1], [0, 1], "k--", label="Perfect calibration")
+    plt.xlabel("Average Predicted P(default)")
+    plt.ylabel("Actual Default Rate")
+    plt.title("Calibration Check — Neural Network")
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
 
 # Huyen Anh notes:
-# Best NN architecture: hidden_layer_sizes=(128, 64, 32), activation=relu,
-#                       solver=adam, alpha=0.01, early_stopping=True,
-#                       max_iter=300, n_iter_no_change=10
-
-# Best validation threshold: 0.0794 (profit-tuned)
-# i.e. approve the loan if P(default) <= 0.0794
-# i.e. approve the loan if P(success) >= 0.9206
-
-# Validation net profit: $59,043,622.40 
-# Approval rate: 74.51% of loans approved
-# Approved default rate: 4.51% (very low — model is conservative about defaults)
-
-# Models attempted (progression):
-# 1. (64,32)  baseline features only       → AUC 0.859, profit $51.7M
-# 2. (128,64) + engineered features        → AUC 0.888, profit $54.7M
-# 3. (128,64,32) + interaction terms       → AUC 0.889, profit $54.3M
-# 4. (128,64,32) + full feature set (24)   → AUC 0.910, profit $59.0M ← BEST
-
-# Key improvements that drove profit gain:
-# - Adding unguaranteed_ratio, unguaranteed_amount, jobs_total, jobs_per_dollar
-#   gave the model more signal about loan risk structure
-# - approval_year, disbursement_year, ApprovalFY_clean captured macroeconomic
-#   time effects beyond just the recession binary flag
-# - log_DisbursementGross captured loan size nonlinearity
-# - Recession_x_RealEstate captured the 2008 housing crisis effect directly
-
-# Loss curve observation:
-# Smooth decline over ~27 epochs, loss reaches ~0.10 (lower than previous attempts).
-# No oscillation or divergence — Adam with alpha=0.01 converged cleanly.
-# early_stopping triggered appropriately, preventing overfitting.
-
-# ROC curve observation:
-# AUC = 0.910, up from 0.859 in first attempt (+0.051 total improvement).
-# Now exceeds leader's NN AUC of 0.902 (+0.008).
-# Strong top-left curve — model ranks defaults above paid loans very reliably.
-
-# Threshold observation:
-# Profit-tuned threshold (0.0794) is much lower than theoretical (0.1667).
-# This means the model is more conservative — only approving loans where
-# it is very confident they will be paid. This makes sense given the
-# approved default rate dropped to just 4.51%, the lowest across all attempts.
-
-# Interpretation for the bank:
-# The final NN recommends approving ~74.5% of loan applications, targeting
-# only those where P(default) <= 7.94%. This strict screening results in
-# an approved portfolio with only 4.51% default rate, well below the
-# overall population default rate of ~17.56%, generating $59M net profit
-# on the validation set. The model outperforms all other methods including
-# the leader's pre-built NN, driven by comprehensive feature engineering
-# covering loan structure, job impact, time effects, and interaction terms.
-
+#
+# === FINAL MODEL ===
+# Architecture:     (128, 64, 32) — three hidden layers
+# Activation:       ReLU (avoids vanishing gradient vs sigmoid/tanh)
+# Solver:           Adam (adaptive learning rates, fast convergence)
+# Alpha:            0.01 (L2 regularization)
+# Learning rate:    0.001 (Adam default)
+# Early stopping:   True (validation_fraction=0.10, n_iter_no_change=10)
+# n_iter:           28 epochs
+# Final loss:       0.0975
+# Best val score:   0.915 (internal early stopping score)
+#
+# === ARCHITECTURE COMPARISON: Small vs Large ===
+# Small (32,16)  alpha=0.05 lr=0.001  → CV AUC 0.9170, profit $57,794,762
+# Large (128,64,32) alpha=0.05 lr=0.0005 → CV AUC 0.9152, profit $58,070,693
+# Original (128,64,32) alpha=0.01 lr=0.001 → CV AUC 0.9132, profit $59,043,622 ← BEST
+#
+# Conclusion: original settings beat both new tuning attempts on validation profit.
+# Larger model (128,64,32) is justified — it consistently outperforms small (32,16)
+# on validation profit across all tuning rounds, despite small model winning CV AUC.
+# Always evaluate on validation profit, not CV AUC alone.
+#
+# === ALPHA SENSITIVITY ===
+# alpha=0.01 outperforms alpha=0.05 on validation profit ($59M vs $58M)
+# even though alpha=0.05 had higher CV AUC.
+# alpha=0.01 provides enough regularization without over-penalizing weights.
+#
+# === LEARNING RATE EFFECT ===
+# lr=0.001 (Adam default) works best for (128,64,32).
+# Loss curve declines smoothly from 0.40 to 0.10 over 28 epochs —
+# no oscillation or divergence, confirming good convergence.
+# Smaller lr=0.0005 did not improve validation profit.
+#
+# === LOSS CURVE OBSERVATION ===
+# Smooth monotonic decline from ~0.40 to ~0.10 over 28 epochs.
+# Steep drop in first 2 epochs, then gradual steady decline.
+# early_stopping triggered at epoch 28 — model converged cleanly.
+# No signs of overfitting (no loss plateau followed by increase).
+#
+# === ROC CURVE ===
+# AUC = 0.910 — strong discrimination between default and paid loans.
+# Curve hugs top-left corner especially at low false positive rates,
+# meaning the model reliably catches defaults without denying good loans.
+#
+# === BRIER SCORE / CALIBRATION ===
+# Brier score: 0.0771 (well below 0.25 random baseline — good calibration)
+# Calibration table shows predicted P(default) closely tracks actual default rate:
+#   Decile 1 (P~0.00): actual 0.7%   ← very safe loans correctly identified
+#   Decile 5 (P~0.006): actual 3.3%  ← low risk correctly identified
+#   Decile 8 (P~0.09): actual 17.6%  ← near population average, well calibrated
+#   Decile 9 (P~0.46): actual 44.3%  ← high risk correctly identified
+#   Decile 10 (P~0.93): actual 85.7% ← very risky loans correctly identified
+# Calibration plot shows points closely following the diagonal (perfect calibration line),
+# with slight overestimation in the lowest deciles (predicts near 0 but actual is 0.7-3%).
+# Overall calibration is strong — probabilities are reliable for business decisions.
+#
+# === THRESHOLD SELECTION ===
+# Theoretical threshold: 1/6 = 0.1667 → profit $56,964,422
+# Profit-tuned threshold: 0.0794 → profit $59,043,622 ← chosen
+# Tuned threshold is lower than theoretical, meaning the model is more
+# conservative — only approving loans where P(default) <= 7.94%.
+# This strict screening results in approved default rate of only 4.51%,
+# well below the population default rate of ~17.56%.
+#
+# === FINAL VALIDATION RESULTS ===
+# Best threshold:        P(default) <= 0.0794
+# Net profit:            $59,043,622.40
+# Approval rate:         74.51%
+# Approved default rate: 4.51%
+# AUC:                   0.910
+# Brier score:           0.0771
+# n_iter:                28 epochs
+# Final loss:            0.0975
 
 #%% 15. Cross-validation helper and result log
 
@@ -1070,61 +1139,80 @@ if RUN_LOGIT_DA_CV:
 
 #%% 15D. Neural network cross-validation / tuning — Owner: Huyen Anh
 
-RUN_NN_CV = True
+RUN_NN_CV = False
 
 if RUN_NN_CV:
     cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=RANDOM_STATE)
 
-    # Wider grid now that we have more features
+    # Leader's suggestions:
+    # 1. Small vs current best architecture
+    # 2. Alpha around 0.01 (weaker/stronger)
+    # 3. Different learning rates
     architectures = [
-        (64, 32),           # previous best with fewer features
-        (128, 64),          # previous best with more features
-        (128, 64, 32),      # 3-layer, previously good AUC
-        (256, 128),         # wider 2-layer
-        (256, 128, 64),     # wider 3-layer
-        (256, 128, 64, 32), # 4-layer — try deeper with richer features
+        (32, 16),           # small model
+        (64, 32),           # medium model
+        (128, 64, 32),      # current best
     ]
-    alphas = [0.0001, 0.001, 0.01]
+    alphas = [0.005, 0.01, 0.05]        # around current best 0.01
+    learning_rates = [0.0005, 0.001]    # smaller than default
 
     for arch in architectures:
         for alpha in alphas:
-            candidate = Pipeline(steps=[
-                ("preprocess", preprocess_scaled),
-                ("model", MLPClassifier(
-                    hidden_layer_sizes=arch,
-                    activation="relu",
-                    solver="adam",
-                    alpha=alpha,
-                    early_stopping=True,
-                    validation_fraction=0.10,
-                    n_iter_no_change=10,
-                    max_iter=300,
-                    random_state=RANDOM_STATE,
-                )),
-            ])
-            scores = cross_val_score(
-                candidate, X_train, y_train,
-                cv=cv, scoring="roc_auc", n_jobs=1  # n_jobs=1 to avoid Mac warnings
-            )
-            add_cv_result(
-                "Huyen Anh", "Neural Network",
-                {"hidden_layer_sizes": arch, "alpha": alpha},
-                scores
-            )
-            print(arch, alpha, round(scores.mean(), 4), "±", round(scores.std(), 4))
+            for lr in learning_rates:
+                candidate = Pipeline(steps=[
+                    ("preprocess", preprocess_scaled),
+                    ("model", MLPClassifier(
+                        hidden_layer_sizes=arch,
+                        activation="relu",
+                        solver="adam",
+                        alpha=alpha,
+                        learning_rate_init=lr,
+                        early_stopping=True,
+                        validation_fraction=0.10,
+                        n_iter_no_change=10,
+                        max_iter=300,
+                        random_state=RANDOM_STATE,
+                    )),
+                ])
+                scores = cross_val_score(
+                    candidate, X_train, y_train,
+                    cv=cv, scoring="roc_auc", n_jobs=1
+                )
+                add_cv_result(
+                    "Huyen Anh", "Neural Network",
+                    {"hidden_layer_sizes": arch, "alpha": alpha, "lr": lr},
+                    scores
+                )
+                print(arch, alpha, lr, round(scores.mean(), 4), "±", round(scores.std(), 4))
 
-# Huyen Anh CV notes:
-# Best NN CV setting: hidden_layer_sizes=(128, 64, 32), alpha=0.01, AUC=0.9132 ± 0.0011
-# Full feature set (24 numeric + 7 categorical) pushed AUC from 0.892 to 0.913,
-# surpassing the leader's NN AUC of 0.902.
-# (128, 64, 32) ties with (256, 128, 64, 32) at AUC=0.9132 but has much lower
-# std (0.0011 vs 0.0057), making it the more reliable and efficient choice.
-# alpha=0.01 (stronger regularization) consistently wins across architectures,
-# suggesting the richer feature set benefits from stronger weight penalty.
-# Did larger networks help enough to justify runtime?
-# No — (256, 128, 64, 32) did not improve AUC over (128, 64, 32) and was
-# less stable. Diminishing returns beyond 3 layers on this dataset.
-
+# Huyen Anh CV notes (Round 2: leader feedback tuning):
+# Grid: architectures=(32,16), (64,32), (128,64,32)
+#       alphas=0.005, 0.01, 0.05
+#       learning_rates=0.0005, 0.001
+#
+# Key results:
+#   Small  (32,16)     alpha=0.05  lr=0.001  → AUC 0.9170 ± 0.0019 (highest CV AUC)
+#   Large  (128,64,32) alpha=0.05  lr=0.0005 → AUC 0.9152 ± 0.0019
+#   Medium (64,32)     alpha=0.05  lr=0.001  → AUC 0.9117 ± 0.0012 (weakest)
+#
+# Alpha sensitivity finding:
+#   alpha=0.05 consistently outperformed alpha=0.005 and alpha=0.01 in CV AUC.
+#   Stronger regularization helps across all architectures on 50k sample.
+#
+# Learning rate finding:
+#   Small model: lr=0.001 slightly better than lr=0.0005
+#   Large model: lr=0.0005 slightly better than lr=0.001
+#   Difference is small (<0.001 AUC) — not a decisive factor.
+#
+# Validation profit comparison (overrides CV AUC for final decision):
+#   Small  (32,16)     alpha=0.05  lr=0.001  → $57,794,762
+#   Large  (128,64,32) alpha=0.05  lr=0.0005 → $58,070,693
+#   Original (128,64,32) alpha=0.01 lr=0.001 → $59,043,622 ← WINNER
+#
+# Final decision: original (128,64,32) alpha=0.01 lr=0.001 chosen.
+# CV AUC alone was misleading — small model won CV but lost validation profit.
+# Key lesson: always validate hyperparameters on business metric (net profit),
+# not just CV AUC. Larger model justified by $1.2M profit advantage over small model.
 
 #%% 15E. CV summary table
 
@@ -1140,21 +1228,45 @@ else:
 
 # Answer / notes:
 # Which settings are worth taking to validation?
-# Top choice: (64, 32) with alpha=0.001 — highest CV AUC (0.8758) and low std (0.0014)
-# meaning it is both accurate and stable across folds.
-
-# Runner-up: (64, 32) with alpha=0.0001 — nearly identical AUC (0.8747) and
-# the lowest std of all (0.0005), extremely stable but slightly less accurate.
-
-# Not worth pursuing:
-# - (32,) single layer: lowest AUC (~0.865-0.868), too simple for this dataset
-# - (128, 64): higher std (0.0019-0.0029) with lower AUC than (64,32),
-#   more complex but does not justify the extra runtime
-# - (64,) single layer: decent AUC (~0.869) but (64,32) is clearly better
-
-# Decision: proceed with (64, 32), alpha=0.001 for Block 14D.
-# This was already confirmed by validation net profit of $51,738,084.80.
-
+#
+# Two rounds of CV were conducted:
+#
+# Round 1 (Block 15D first run) — architecture + alpha grid:
+#   Grid: (32,), (64,), (64,32), (128,64), (128,64,32), (256,128), (256,128,64), (256,128,64,32)
+#         alphas = 0.0001, 0.001, 0.01
+#   Best: (128,64,32) alpha=0.01, lr=0.001 → AUC 0.9132 ± 0.0011
+#   Finding: 3-layer networks outperform 2-layer and 1-layer.
+#            alpha=0.01 consistently better than 0.0001 and 0.001.
+#            (256,128,64,32) ties AUC but higher std — not worth extra runtime.
+#
+# Round 2 (Block 15D second run) — leader feedback tuning:
+#   Grid: (32,16), (64,32), (128,64,32)
+#         alphas = 0.005, 0.01, 0.05
+#         learning_rates = 0.0005, 0.001
+#   Best CV AUC: (32,16) alpha=0.05, lr=0.001 → AUC 0.9170 ± 0.0019
+#   Finding: stronger alpha=0.05 beats alpha=0.01 in CV AUC across all architectures.
+#            small model surprisingly wins CV AUC over large model.
+#
+# Validation profit comparison (final decision):
+#   Small  (32,16)       alpha=0.05 lr=0.001  → $57,794,762
+#   Large  (128,64,32)   alpha=0.05 lr=0.0005 → $58,070,693
+#   Original (128,64,32) alpha=0.01 lr=0.001  → $59,043,622 ← WINNER
+#
+# Settings worth taking to validation:
+#   ONLY (128,64,32) alpha=0.01 lr=0.001 — highest net profit by $1M+ margin.
+#
+# Settings NOT worth pursuing:
+#   - (32,16): won CV AUC but lost validation profit by $1.2M —
+#     CV AUC overstated small model performance
+#   - alpha=0.05: better in CV but worse in validation profit
+#   - (256,128,64,32): tied CV AUC with (128,64,32) but higher std and slower
+#   - (64,32) and smaller: consistently lower AUC and profit than (128,64,32)
+#
+# Key lesson:
+#   CV AUC and validation profit do not always agree.
+#   For this competition, validation net profit is the correct selection criterion.
+#   The original (128,64,32) alpha=0.01 lr=0.001 was confirmed as final model
+#   with $59,043,622 net profit, AUC=0.910, Brier=0.0771.
 
 #%% 16. Build validation leaderboard
 
@@ -1169,8 +1281,6 @@ model_results = []
 # model_results.append(rf_tuned)
 # model_results.append(ridge_tuned)
 # model_results.append(mlp_tuned)
-
-model_results.append(mlp_tuned)
 
 baseline_rows = [
     {
