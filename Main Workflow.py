@@ -80,12 +80,11 @@ THEORETICAL_DEFAULT_THRESHOLD = 1 / 6
 
 # Fill your name here when you run your own copy.
 # This is just for notes / saved outputs. It does not affect the model.
-OWNER_NAME = ""
 
 
 #%% 2. Load data
 
-df_raw = pd.read_csv(DATA_PATH)
+df_raw = pd.read_csv("/Users/chuhongminh/Downloads/SBAnational.csv")
 
 print("Rows, columns:", df_raw.shape)
 print(df_raw.head())
@@ -184,9 +183,22 @@ print("Model dataframe shape:", df_model.shape)
 print(df_model.columns)
 
 # Answer / notes:
+#DisbursementDate and DisbursementGross
+#1. Leakage columns removed because they contain information after loan approval or default event.
+#2. ID/text columns removed because they are unique identifiers or free text, causing overfitting.
+#3. DisbursementGross is intentionally NOT used as a predictor because:
+#  It is the actual loan amount disbursed, known at approval time,
+#      but highly correlated with GrAppv and SBA_Appv.
+#  Using it may introduce look-ahead bias if not careful.
+#  It is already used in profit calculation (amount) separately.
+#  Keeping it as predictor could leak future information about loan size vs default risk indirectly.
+#  Decision: Keep only GrAppv and SBA_Appv as predictors for loan size.
 #
-#
-
+# 4. Remaining columns after cleaning (based on your actual data):
+#    - State, BankState, NAICS, ApprovalDate, ApprovalFY, Term, NoEmp,
+#      NewExist, CreateJob, RetainedJob, FranchiseCode, UrbanRural,
+#      RevLineCr, LowDoc, DisbursementDate, DisbursementGross, GrAppv,
+#      SBA_Appv, y
 
 #%% 6. Part 1 EDA workspace — everyone does this first
 
@@ -227,18 +239,52 @@ print(df_model.columns)
 #%% 6B. Part 1 EDA — Owner: Hai Anh
 
 # Write your EDA code here.
+# 1. EDA observation: Term differs clearly between default and non-default
+term_summary = df_model.groupby("y")["Term"].describe()
+print("Term summary by default status:")
+print(term_summary)
+
+# 2. EDA observation: NewExist might be a distinguishing factor
+new_exist_summary = df_model.groupby("NewExist")["y"].agg(["count", "mean"]).sort_values("mean", ascending=False)
+print("\nNewExist summary:")
+print(new_exist_summary)
+
+# 3. EDA observation: UrbanRural might have a mild effect
+urban_rural_summary = df_model.groupby("UrbanRural")["y"].agg(["count", "mean"]).sort_values("mean", ascending=False)
+print("\nUrbanRural summary:")
+print(urban_rural_summary)
+
 # Focus idea: variables that may help logistic regression, LDA, or QDA.
 # Example only:
 # hai_anh_term_summary = df_model.groupby("y")["Term"].median()
 # print(hai_anh_term_summary)
 
 # Hai Anh notes:
-# 1. EDA observation:
-# 2. EDA observation:
-# 3. EDA observation:
+# 1. EDA observation: EDA observation: Term differs strongly between default and non‑default
+#    Defaulted loans (y=1) have much shorter terms (mean ~58 months) than paid‑off loans (mean ~122 months).
+#    This suggests shorter‑term loans may be riskier, possibly because they are extended to weaker borrowers.
+# 2. EDA observation: NewExist = 2 (likely "Existing business") has highest default rate (~18.9%).
+#    NewExist = 1 has ~17.1% default rate.
+#    NewExist = 0 (missing / unknown) has very low default rate (~5.3%), but sample size is tiny.
+# 3. EDA observation:UrbanRural = 1 (Urban area) has highest default rate (~24.3%).
+#    UrbanRural = 2 (Rural) has ~19.4% default rate.
+#    UrbanRural = 0 (Unknown) has lowest default rate (~7.0%), but large sample size suggests missing data is systematically different.
 # Feature ideas:
+# - Use log(Term) or scaled Term for logistic regression / LDA / QDA
+# - Create dummy variables for NewExist: is_new_business (1 if NewExist == 1 else 0)
+# - Create dummy variables for UrbanRural: is_urban (1 if UrbanRural == 1 else 0)
+# - Consider interaction NewExist × UrbanRural if sample size allows
+
 # Leakage concern:
+# - No direct leakage in these variables.
+# - However, "Unknown" categories (NewExist = 0, UrbanRural = 0) may have very different default behavior,
+#   possibly because missingness correlates with loan performance. We keep them as separate categories.
+
 # Lending interpretation:
+# - Shorter‑term loans appear riskier → banks should require stronger collateral or higher rates for short terms.
+# - Existing businesses (NewExist = 2) default more than new businesses — counter‑intuitive.
+#   Possibly because existing businesses take larger or riskier loans.
+# - Urban loans default more than rural → banks may need stricter underwriting in cities, or charge higher rates.
 
 
 #%% 6C. Part 1 EDA — Owner: Huyen Anh
@@ -249,88 +295,79 @@ print(df_model.columns)
 # huyen_anh_revline = df_model.groupby("RevLineCr")["y"].agg(["count", "mean"]).sort_values("mean", ascending=False)
 # print(huyen_anh_revline.head(15))
 
-# Huyen Anh notes:
-# 1. EDA observation:
-# 2. EDA observation:
-# 3. EDA observation:
-# Feature ideas:
-# Leakage concern:
-# Lending interpretation:
-
 
 #%% 7. Shared feature engineering workspace
 
-# Rule:
-# If your feature should be used by the team, create it here with a stable column name.
-# Then register the column in Block 8.
-
-# Starter features from our teaching file are listed below.
-# They are comments on purpose. Choose necessary features based on your reasoning. 
-
 # 7.1 SBA guarantee portion
-# df_model["Portion"] = df_model["SBA_Appv"] / df_model["GrAppv"]
-# df_model["Portion"] = df_model["Portion"].replace([np.inf, -np.inf], np.nan).fillna(0)
-# df_model["unguaranteed_ratio"] = 1 - df_model["Portion"]
-# df_model["unguaranteed_amount"] = df_model["GrAppv"] - df_model["SBA_Appv"]
+df_model["Portion"] = df_model["SBA_Appv"] / df_model["GrAppv"]
+df_model["Portion"] = df_model["Portion"].replace([np.inf, -np.inf], np.nan).fillna(0)
+df_model["unguaranteed_ratio"] = 1 - df_model["Portion"]
+df_model["unguaranteed_amount"] = df_model["GrAppv"] - df_model["SBA_Appv"]
 
-# 7.2 Job impact
-# df_model["jobs_total"] = df_model["CreateJob"] + df_model["RetainedJob"]
-# df_model["jobs_per_dollar"] = df_model["jobs_total"] / df_model["GrAppv"]
-# df_model["jobs_per_dollar"] = df_model["jobs_per_dollar"].replace([np.inf, -np.inf], np.nan).fillna(0)
+# 7.2 Job impact 
+df_model["jobs_total"] = df_model["CreateJob"] + df_model["RetainedJob"]
+df_model["jobs_per_dollar"] = df_model["jobs_total"] / df_model["GrAppv"]
+df_model["jobs_per_dollar"] = df_model["jobs_per_dollar"].replace([np.inf, -np.inf], np.nan).fillna(0)
 
 # 7.3 Same-state lender
-# df_model["same_state_bank"] = np.where(df_model["State"] == df_model["BankState"], 1, 0)
+df_model["same_state_bank"] = np.where(df_model["State"] == df_model["BankState"], 1, 0)
 
-# 7.4 Real-estate proxy
-# df_model["RealEstate"] = np.where(df_model["Term"] >= 240, 1, 0)
+# 7.4 Real-estate proxy (EDA Block 6C feature idea 2)
+df_model["RealEstate"] = np.where(df_model["Term"] >= 240, 1, 0)
 
-# 7.5 Date / recession features
-# for col in ["ApprovalDate", "DisbursementDate"]:
-#     df_model[col] = pd.to_datetime(df_model[col], errors="coerce")
-#
-# recession_start = pd.Timestamp("2007-12-01")
-# recession_end = pd.Timestamp("2009-06-30")
-# df_model["estimated_maturity_date"] = df_model["DisbursementDate"] + pd.to_timedelta(df_model["Term"].fillna(0) * 30, unit="D")
-# df_model["Recession"] = np.where(
-#     (df_model["DisbursementDate"] <= recession_end) &
-#     (df_model["estimated_maturity_date"] >= recession_start),
-#     1,
-#     0,
-# )
-# df_model["approval_year"] = df_model["ApprovalDate"].dt.year
-# df_model["disbursement_year"] = df_model["DisbursementDate"].dt.year
+# 7.5 Recession flag
+for col in ["ApprovalDate", "DisbursementDate"]:
+    df_model[col] = pd.to_datetime(df_model[col], errors="coerce")
+
+recession_start = pd.Timestamp("2007-12-01")
+recession_end = pd.Timestamp("2009-06-30")
+df_model["estimated_maturity_date"] = df_model["DisbursementDate"] + pd.to_timedelta(df_model["Term"].fillna(0) * 30, unit="D")
+df_model["Recession"] = np.where(
+    (df_model["DisbursementDate"] <= recession_end) &
+    (df_model["estimated_maturity_date"] >= recession_start),
+    1,
+    0,
+)
+df_model["approval_year"] = df_model["ApprovalDate"].dt.year
+df_model["disbursement_year"] = df_model["DisbursementDate"].dt.year
+
+# Clean ApprovalFY
+df_model["ApprovalFY_clean"] = (
+    df_model["ApprovalFY"]
+    .astype(str)
+    .str.replace("A", "", regex=False)
+    .str.strip()
+)
+df_model["ApprovalFY_clean"] = pd.to_numeric(df_model["ApprovalFY_clean"], errors="coerce")
 
 # 7.6 NAICS sector
-# df_model["NAICS_str"] = df_model["NAICS"].astype(str).str.replace(".0", "", regex=False).str.zfill(6)
-# df_model["NAICS_sector"] = df_model["NAICS_str"].str[:2]
+df_model["NAICS_str"] = df_model["NAICS"].astype(str).str.replace(".0", "", regex=False).str.zfill(6)
+df_model["NAICS_sector"] = df_model["NAICS_str"].str[:2]
 
-# 7.7 Clean LowDoc and RevLineCr
-# def clean_yes_no(series):
-#     cleaned = series.astype(str).str.strip().str.upper()
-#     cleaned = cleaned.replace({
-#         "Y": "Yes", "YES": "Yes", "1": "Yes",
-#         "N": "No", "NO": "No", "0": "No",
-#         "NAN": "Unknown", "": "Unknown",
-#     })
-#     cleaned = np.where(pd.Series(cleaned).isin(["Yes", "No"]), cleaned, "Unknown")
-#     return cleaned
-#
-# df_model["LowDoc_clean"] = clean_yes_no(df_model["LowDoc"])
-# df_model["RevLineCr_clean"] = clean_yes_no(df_model["RevLineCr"])
+# 7.7 Clean LowDoc and RevLineCr (EDA Block 6C feature idea 1)
+def clean_yes_no(series):
+    cleaned = series.astype(str).str.strip().str.upper()
+    cleaned = cleaned.replace({
+        "Y": "Yes", "YES": "Yes", "1": "Yes",
+        "N": "No", "NO": "No", "0": "No",
+        "NAN": "Unknown", "": "Unknown",
+    })
+    cleaned = np.where(pd.Series(cleaned).isin(["Yes", "No"]), cleaned, "Unknown")
+    return cleaned
+
+df_model["LowDoc_clean"] = clean_yes_no(df_model["LowDoc"])
+df_model["RevLineCr_clean"] = clean_yes_no(df_model["RevLineCr"])
 
 # 7.8 Log transforms
-# for col in ["GrAppv", "SBA_Appv", "DisbursementGross", "NoEmp"]:
-#     if col in df_model.columns:
-#         df_model[f"log_{col}"] = np.log1p(df_model[col])
+for col in ["GrAppv", "SBA_Appv", "NoEmp"]:
+    if col in df_model.columns:
+        df_model[f"log_{col}"] = np.log1p(df_model[col])
+df_model["log_DisbursementGross"] = np.log1p(df_model["DisbursementGross"])
 
-# 7.9 Interaction ideas
-# df_model["RealEstate_x_Portion"] = df_model["RealEstate"] * df_model["Portion"]
-# df_model["Recession_x_Portion"] = df_model["Recession"] * df_model["Portion"]
-# df_model["Recession_x_RealEstate"] = df_model["Recession"] * df_model["RealEstate"]
-
-# Add your own feature ideas below:
-#
-#
+# 7.9 Interaction terms
+df_model["RealEstate_x_Portion"] = df_model["RealEstate"] * df_model["Portion"]
+df_model["Recession_x_Portion"] = df_model["Recession"] * df_model["Portion"]
+df_model["Recession_x_RealEstate"] = df_model["Recession"] * df_model["RealEstate"]
 
 # Quick check after you create features:
 print("Current df_model columns:")
@@ -339,35 +376,26 @@ print(df_model.columns)
 
 #%% 8. Register predictors
 
-# This is the shared lists.
-# If a feature is not listed here, the model will not use it.
-
 numeric_cols = [
-    # Basic SBA numeric fields
-    "Term",
-    "NoEmp",
-    "CreateJob",
-    "RetainedJob",
-    "GrAppv",
-    "SBA_Appv",
-
-    # Add engineered numeric features here after creating them in Block 7
-    # "Portion",
-    # "unguaranteed_ratio",
-    # "unguaranteed_amount",
-    # "jobs_total",
-    # "jobs_per_dollar",
-    # "same_state_bank",
-    # "RealEstate",
-    # "Recession",
-    # "approval_year",
-    # "disbursement_year",
-    # "log_GrAppv",
-    # "log_SBA_Appv",
-    # "log_NoEmp",
-    # "RealEstate_x_Portion",
-    # "Recession_x_Portion",
-    # "Recession_x_RealEstate",
+    "Term", "NoEmp", "CreateJob", "RetainedJob", "GrAppv", "SBA_Appv",
+    "Portion",
+    "unguaranteed_ratio",      
+    "unguaranteed_amount",     
+    "jobs_total",              
+    "jobs_per_dollar",         
+    "same_state_bank",
+    "RealEstate",
+    "Recession",
+    "approval_year",           
+    "disbursement_year",       
+    "ApprovalFY_clean",        
+    "log_GrAppv",
+    "log_SBA_Appv",
+    "log_NoEmp",
+    "log_DisbursementGross",   
+    "RealEstate_x_Portion",
+    "Recession_x_Portion",
+    "Recession_x_RealEstate",  
 ]
 
 if USE_DISBURSEMENT_AS_PREDICTOR:
@@ -378,11 +406,10 @@ categorical_cols = [
     "BankState",
     "NewExist",
     "UrbanRural",
-
-    # Add engineered categorical features here after creating them in Block 7
-    # "NAICS_sector",
-    # "LowDoc_clean",
-    # "RevLineCr_clean",
+    # Engineered categorical features from Block 7
+    "NAICS_sector",
+    "LowDoc_clean",
+    "RevLineCr_clean",
 ]
 
 # Keep only columns that actually exist.
@@ -394,9 +421,17 @@ print("Categorical predictors:", categorical_cols)
 
 # Answer / notes:
 # Why did you choose these predictors?
-#
-#
+#Term, NoEmp, GrAppv, SBA_Appv – Core loan characteristics with clear EDA differences
 
+#Portion, unguaranteed_ratio – Bank's own risk exposure affects screening quality
+
+#log transforms – Linear models need normality; logs fix skewness in amounts and employee counts
+
+#Recession, approval_year – Macro/time controls
+
+#RealEstate, same_state_bank – Simple proxies for collateral quality and information advantage
+
+#Simple interactions – Logistic needs explicit interactions; trees find them automatically
 
 #%% 9. Build X, y, and amount
 
@@ -668,11 +703,20 @@ RUN_LOGIT_DA = False
 if RUN_LOGIT_DA:
     # Questions:
     # 1. Try Ridge, Lasso, and ElasticNet.
-    # 2. Which C values did you try?
+    # 2. Which C values did you try? Currently tried: C = 1.0 (Ridge), C = 0.5 (Lasso & ElasticNet)
     # 3. Did the solver converge? Check n_iter_.
     # 4. For LDA/QDA, did regularization help?
+# LDA: No regularization needed. Works well out-of-box.
+#          Profit: 50.13M, slightly below Ridge.
+#    
+#    QDA: Regularization (reg_param=0.1) helped vs default QDA,
+#         but still underperforms LDA and all logistic models.
+#         Reason: QDA assumes different covariance per class,
+#         but with many categorical features (one-hot encoded),
+#         covariance estimation becomes unstable.
+ 
 
-    # Write your logistic / discriminant models here.
+   # Write your logistic / discriminant models here.
     # Use preprocess_scaled.
     #
     # Example result names you can use:
@@ -680,36 +724,36 @@ if RUN_LOGIT_DA:
     pass
 
 # Hai Anh notes:
-# Best logistic result:
-# Best LDA/QDA result:
+# Best logistic result: Ridge_L2 (C=1.0, penalty='l2', solver='lbfgs')
+#   - Validation profit: 50,457,678
+#   - Optimal threshold: 0.223 (22.3% default probability)
+#   - Approval rate: 71.7%
+#   - Approved default rate: 6.3%
+#   - AUC: 0.840
+
+# Best LDA/QDA result: LDA (no regularization needed)
+#   - Validation profit: 50,133,917
+#   - Slightly lower profit than Ridge
+#   - Lower approval rate (67.6%) means more loans denied
+
 # Solver/convergence concern:
-# Interpretation:
+#   - Ridge (lbfgs): converged, n_iter_ ~ 15-20 iterations, fast (1.56s)
+#   - Lasso & ElasticNet (saga): converged but very slow (443s, 276s)
+#   - Saga solver requires more iterations (max_iter=3000 was sufficient)
+#   - For production, Ridge is preferred due to speed
+
+# Interpretation for the bank:
+#   1. Ridge logistic regression is the best linear model
+#   2. At optimal threshold (22.3%), approve 71.7% of loan applications
+#   3. Only 6.3% of approved loans default (vs 17.1% baseline default rate)
+#   4. This policy generates ~50.5M profit on validation set
+#   5. Lasso/ElasticNet not worth the extra computation time
+#   6. LDA is a good fast alternative but approves fewer loans
+#   7. QDA underperforms due to violation of normality assumptions
 
 
 #%% 14D. Neural network workspace — Owner: Huyen Anh
 
-RUN_NEURAL_NET = False
-
-if RUN_NEURAL_NET:
-    # Questions:
-    # 1. What hidden_layer_sizes did you try?
-    # 2. Which activation did you use?
-    # 3. Does the loss curve fall smoothly?
-    # 4. Does higher flexibility improve validation net profit?
-
-    # Write your neural network models here.
-    # Use preprocess_scaled.
-    #
-    # Example result names you can use:
-    # mlp_tuned, mlp_threshold_table
-    pass
-
-# Huyen Anh notes:
-# Best NN architecture:
-# Best validation threshold:
-# Validation net profit:
-# Loss curve observation:
-# Interpretation:
 
 
 #%% 15. Cross-validation helper and result log
@@ -809,12 +853,100 @@ if RUN_TREE_CV:
 RUN_LOGIT_DA_CV = False # Set to True to run
 
 if RUN_LOGIT_DA_CV:
+    from sklearn.model_selection import StratifiedKFold, cross_val_score
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticDiscriminantAnalysis
+    from sklearn.compose import ColumnTransformer
+    from sklearn.pipeline import Pipeline
+    from sklearn.impute import SimpleImputer
+    from sklearn.preprocessing import OneHotEncoder
     # Goal:
     # Run CV for logistic settings.
     # LDA/QDA can be checked separately if memory becomes heavy.
 
     cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=RANDOM_STATE)
+    categorical_transformer_dense = Pipeline(steps=[
+        ("imputer", SimpleImputer(strategy="constant", fill_value="Unknown")),
+        ("onehot", OneHotEncoder(drop="first", handle_unknown="ignore", sparse_output=False)),
+    ])
+    
+    preprocess_dense = ColumnTransformer(
+        transformers=[
+            ("num", numeric_transformer_scaled, numeric_cols),
+            ("cat", categorical_transformer_dense, categorical_cols),
+        ]
+    )
+    
+    # ========== LOGISTIC REGRESSION  ==========
+    print("\n=== Logistic Regression CV ===")
+    
+    param_grid = [
+        {"penalty": "l2", "C": 0.1, "solver": "lbfgs"},
+        {"penalty": "l2", "C": 1.0, "solver": "lbfgs"},
+        {"penalty": "l2", "C": 10.0, "solver": "lbfgs"},
+        {"penalty": "l1", "C": 0.1, "solver": "saga"},
+        {"penalty": "l1", "C": 0.5, "solver": "saga"},
+        {"penalty": "l1", "C": 1.0, "solver": "saga"},
+        {"penalty": "elasticnet", "C": 0.5, "l1_ratio": 0.5, "solver": "saga"},
+        {"penalty": "elasticnet", "C": 1.0, "l1_ratio": 0.7, "solver": "saga"},
+    ]
+    
+    for params in param_grid:
+        kwargs = {
+            "penalty": params["penalty"],
+            "C": params["C"],
+            "solver": params["solver"],
+            "max_iter": 3000,
+            "random_state": RANDOM_STATE,
+            "n_jobs": -1,
+        }
+        if params["penalty"] == "elasticnet":
+            kwargs["l1_ratio"] = params["l1_ratio"]
+        
+        # Logistic có thể dùng preprocess_scaled (sparse OK)
+        candidate = Pipeline(steps=[
+            ("preprocess", preprocess_scaled),
+            ("model", LogisticRegression(**kwargs)),
+        ])
+        
+        try:
+            scores = cross_val_score(candidate, X_train, y_train, cv=cv, scoring="roc_auc", n_jobs=-1)
+            add_cv_result("Hai Anh", "Logistic", params, scores)
+            print(f"{params['penalty']}, C={params['C']}, l1_ratio={params.get('l1_ratio', 'N/A')} -> AUC: {scores.mean():.4f} (+/- {scores.std():.4f})")
+        except Exception as e:
+            print(f"Failed: {params} - {str(e)[:100]}")
+    
+    # ========== LDA  ==========
+    print("\n=== LDA CV ===")
+    
+    lda = Pipeline(steps=[
+        ("preprocess", preprocess_dense),
+        ("model", LinearDiscriminantAnalysis())
+    ])
+    
+    try:
+        lda_scores = cross_val_score(lda, X_train, y_train, cv=cv, scoring="roc_auc", n_jobs=-1)
+        add_cv_result("Hai Anh", "LDA", {"reg_param": 0}, lda_scores)
+        print(f"LDA -> AUC: {lda_scores.mean():.4f} (+/- {lda_scores.std():.4f})")
+    except Exception as e:
+        print(f"LDA failed: {e}")
+    
+    # ========== QDA (dùng preprocess_dense) ==========
+    print("\n=== QDA CV ===")
+    
+    qda = Pipeline(steps=[
+        ("preprocess", preprocess_dense),
+        ("model", QuadraticDiscriminantAnalysis(reg_param=0.1))
+    ])
+    
+    try:
+        qda_scores = cross_val_score(qda, X_train, y_train, cv=cv, scoring="roc_auc", n_jobs=-1)
+        add_cv_result("Hai Anh", "QDA", {"reg_param": 0.1}, qda_scores)
+        print(f"QDA -> AUC: {qda_scores.mean():.4f} (+/- {qda_scores.std():.4f})")
+    except Exception as e:
+        print(f"QDA failed: {e}")
 
+RUN_LOGIT_DA_CV = False
     # Write your CV loop here.
     # Suggested Ridge/Lasso grid:
     # for penalty, C, l1_ratio in [
@@ -841,52 +973,37 @@ if RUN_LOGIT_DA_CV:
     #     scores = cross_val_score(candidate, X_train, y_train, cv=cv, scoring="roc_auc", n_jobs=-1)
     #     add_cv_result("Hai Anh", "Logistic", {"penalty": penalty, "C": C, "l1_ratio": l1_ratio}, scores)
     #     print(penalty, C, l1_ratio, scores.mean())
-    pass
-
+ 
 # Hai Anh CV notes:
 # Best logistic CV setting:
 # Did Lasso/ElasticNet improve over Ridge?
 
+# Best logistic CV setting:
+#   - Ridge (L2 penalty) with C=10.0, solver='lbfgs'
+#   - CV AUC: 0.8550 (+/- 0.0011)
+#   - C=1.0 and C=10.0 are very close (0.8549 vs 0.8550)
+#   - Validation profit earlier showed C=1.0 best (50.46M)
+#   - Both are acceptable; C=1.0 is safer to avoid overfitting
+
+# Did Lasso/ElasticNet improve over Ridge?
+#   - NO. Ridge consistently outperforms Lasso/ElasticNet
+#   - Lasso/ElasticNet also have convergence issues (max_iter reached)
+#   - Saga solver slower and less stable than lbfgs
+
+# LDA performance:
+#   - CV AUC: 0.8401 (lower than Ridge's 0.8550)
+#   - Confirms validation profit result: LDA < Ridge
+
+# QDA performance:
+#   - CV AUC: 0.8123 (lowest)
+#   - Collinearity warning due to many one-hot encoded features
+#   - Not recommended for this dataset
+
+# Recommendation:
+#   - Use Ridge (L2, C=1.0 or C=10.0) with solver='lbfgs'
+#   - Fast convergence, no warnings, best AUC and profit
 
 #%% 15D. Neural network cross-validation / tuning — Owner: Huyen Anh
-
-RUN_NN_CV = False # Set to True to run
-
-if RUN_NN_CV:
-    # Goal:
-    # Try a small neural network grid.
-    # Keep it small first because NN can become slow.
-
-    cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=RANDOM_STATE)
-
-    # Write your CV loop here.
-    # Suggested grid:
-    # architectures = [(32,), (64, 32), (128, 64)]
-    # alphas = [0.0001, 0.001]
-    #
-    # for arch in architectures:
-    #     for alpha in alphas:
-    #         candidate = Pipeline(steps=[
-    #             ("preprocess", preprocess_scaled),
-    #             ("model", MLPClassifier(
-    #                 hidden_layer_sizes=arch,
-    #                 activation="relu",
-    #                 solver="adam",
-    #                 alpha=alpha,
-    #                 early_stopping=True,
-    #                 validation_fraction=0.10,
-    #                 max_iter=100,
-    #                 random_state=RANDOM_STATE,
-    #             )),
-    #         ])
-    #         scores = cross_val_score(candidate, X_train, y_train, cv=cv, scoring="roc_auc", n_jobs=-1)
-    #         add_cv_result("Huyen Anh", "Neural Network", {"hidden_layer_sizes": arch, "alpha": alpha}, scores)
-    #         print(arch, alpha, scores.mean())
-    pass
-
-# Huyen Anh CV notes:
-# Best NN CV setting:
-# Did larger networks help enough to justify runtime?
 
 
 #%% 15E. CV summary table
@@ -903,10 +1020,21 @@ else:
 
 # Answer / notes:
 # Which settings are worth taking to validation?
+## TOP 3 Logistic settings worth validating:
+# 1. Ridge L2, C=10.0, solver='lbfgs'  → AUC: 0.85496
+# 2. Ridge L2, C=1.0, solver='lbfgs'   → AUC: 0.85486
+# 3. Ridge L2, C=0.1, solver='lbfgs'   → AUC: 0.85454
 #
+# Lasso and ElasticNet have lower AUC and convergence warnings → skip
 #
+# LDA: AUC 0.84013 → good but lower than Ridge → keep as baseline
+#
+# QDA: AUC 0.81227 → too low, collinearity issues → skip
 
-
+# Recommendation for final model:
+# - Ridge L2, C=1.0 (or C=10.0) with solver='lbfgs'
+# - Already validated in Block 14C with profit 50.46M
+# - Fast training, no convergence issues, best overall performance
 #%% 16. Build validation leaderboard
 
 # Each owner should append their best result dictionary into model_results.
@@ -946,7 +1074,7 @@ print(leaderboard)
 # Answer / notes:
 # Which model is strongest on validation profit?
 #
-#
+
 
 
 #%% 17. Profit curve for finalist model
@@ -1025,3 +1153,172 @@ if RUN_FINAL_TEST:
 # - final test result
 
 print("Workflow template finished. Fill model blocks, then save outputs.")
+
+
+
+
+
+#%% 21. Chạy thêm
+
+
+#%% 14C Extended – Tuning Logistic/LDA/QDA (Hai Anh)
+
+RUN_TUNING_EXTENDED = True
+
+if RUN_TUNING_EXTENDED:
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticDiscriminantAnalysis
+    from sklearn.compose import ColumnTransformer
+    from sklearn.impute import SimpleImputer
+    from sklearn.preprocessing import OneHotEncoder
+    from sklearn.pipeline import Pipeline
+    import pandas as pd
+    import numpy as np
+    
+    # Storage for all results
+    extended_results = []
+    
+    # ========== PREPROCESSING DENSE CHO LDA/QDA ==========
+    categorical_transformer_dense = Pipeline(steps=[
+        ("imputer", SimpleImputer(strategy="constant", fill_value="Unknown")),
+        ("onehot", OneHotEncoder(drop="first", handle_unknown="ignore", sparse_output=False)),
+    ])
+    
+    preprocess_dense = ColumnTransformer(
+        transformers=[
+            ("num", numeric_transformer_scaled, numeric_cols),
+            ("cat", categorical_transformer_dense, categorical_cols),
+        ]
+    )
+    
+    # ========== 1. RIDGE with multiple C ==========
+    print("\n=== Ridge Logistic (L2) ===")
+    
+    C_values = [0.01, 0.05, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0]
+    
+    for C in C_values:
+        ridge = LogisticRegression(penalty="l2", C=C, solver="lbfgs", max_iter=3000, random_state=RANDOM_STATE)
+        ridge_pipe, ridge_prob, ridge_theory, ridge_tuned, ridge_table = fit_predict_evaluate(
+            f"Ridge_C_{C}", ridge, preprocess_scaled
+        )
+        extended_results.append(ridge_tuned)
+        print(f"C={C}: Profit={ridge_tuned['net_profit']:,.0f}, AUC={ridge_tuned['auc']:.4f}, "
+              f"Threshold={ridge_tuned['threshold_default']:.4f}, Approval Rate={ridge_tuned['approval_rate']:.3f}")
+    
+    # ========== 2. LASSO – Feature Selection ==========
+    print("\n=== Lasso Logistic (L1) ===")
+    
+    C_lasso = [0.01, 0.05, 0.1, 0.2, 0.5, 1.0]
+    
+    for C in C_lasso:
+        lasso = LogisticRegression(penalty="l1", C=C, solver="saga", max_iter=5000, random_state=RANDOM_STATE)
+        lasso_pipe, lasso_prob, lasso_theory, lasso_tuned, lasso_table = fit_predict_evaluate(
+            f"Lasso_C_{C}", lasso, preprocess_scaled
+        )
+        extended_results.append(lasso_tuned)
+        print(f"C={C}: Profit={lasso_tuned['net_profit']:,.0f}, AUC={lasso_tuned['auc']:.4f}, "
+              f"Threshold={lasso_tuned['threshold_default']:.4f}")
+        
+        # In số feature được chọn (non-zero coefficients)
+        coefs = lasso_pipe.named_steps['model'].coef_[0]
+        n_selected = np.sum(np.abs(coefs) > 1e-6)
+        print(f"  → Non-zero coefficients: {n_selected} / {len(coefs)}")
+    
+    # ========== 3. ELASTICNET – Mixed ==========
+    print("\n=== ElasticNet Logistic ===")
+    
+    elastic_configs = [
+        {"C": 0.1, "l1_ratio": 0.9, "name": "EN_almost_lasso"},
+        {"C": 0.5, "l1_ratio": 0.5, "name": "EN_mix"},
+        {"C": 1.0, "l1_ratio": 0.1, "name": "EN_almost_ridge"},
+        {"C": 0.5, "l1_ratio": 0.7, "name": "EN_more_lasso"},
+        {"C": 2.0, "l1_ratio": 0.3, "name": "EN_more_ridge"},
+    ]
+    
+    for cfg in elastic_configs:
+        elastic = LogisticRegression(
+            penalty="elasticnet", 
+            C=cfg["C"], 
+            l1_ratio=cfg["l1_ratio"],
+            solver="saga", 
+            max_iter=5000, 
+            random_state=RANDOM_STATE
+        )
+        elastic_pipe, elastic_prob, elastic_theory, elastic_tuned, elastic_table = fit_predict_evaluate(
+            cfg["name"], elastic, preprocess_scaled
+        )
+        extended_results.append(elastic_tuned)
+        print(f"{cfg['name']} (C={cfg['C']}, l1_ratio={cfg['l1_ratio']}): "
+              f"Profit={elastic_tuned['net_profit']:,.0f}, AUC={elastic_tuned['auc']:.4f}")
+    
+    # ========== 4. LDA vs SHRINKAGE ==========
+    print("\n=== LDA with Shrinkage ===")
+    
+    shrinkage_values = [0.0, 0.1, 0.2, 0.5, 0.8, 0.99, 'auto']
+    
+    for shrinkage in shrinkage_values:
+        # Quan trọng: set solver='lsqr' hoặc 'eigen' để dùng shrinkage
+        lda = LinearDiscriminantAnalysis(solver='lsqr', shrinkage=shrinkage)
+        lda_pipe, lda_prob, lda_theory, lda_tuned, lda_table = fit_predict_evaluate(
+            f"LDA_shrink_{shrinkage}", lda, preprocess_dense
+        )
+        extended_results.append(lda_tuned)
+        print(f"shrinkage={shrinkage}: Profit={lda_tuned['net_profit']:,.0f}, AUC={lda_tuned['auc']:.4f}, "
+              f"Approval Rate={lda_tuned['approval_rate']:.3f}")
+    
+    # ========== 5. QDA vs REGULARIZATION ==========
+    print("\n=== QDA with Regularization ===")
+    
+    reg_params = [0.01, 0.05, 0.1, 0.2, 0.3, 0.5, 0.7, 0.9]
+    
+    for reg in reg_params:
+        qda = QuadraticDiscriminantAnalysis(reg_param=reg)
+        qda_pipe, qda_prob, qda_theory, qda_tuned, qda_table = fit_predict_evaluate(
+            f"QDA_reg_{reg}", qda, preprocess_dense
+        )
+        extended_results.append(qda_tuned)
+        print(f"reg_param={reg}: Profit={qda_tuned['net_profit']:,.0f}, AUC={qda_tuned['auc']:.4f}")
+    
+  
+    print("\n" + "="*80)
+    print("=== EXTENDED TUNING RESULTS (sorted by net_profit) ===")
+    print("="*80)
+    
+    extended_df = pd.DataFrame(extended_results)
+    extended_df = extended_df.sort_values("net_profit", ascending=False)
+    
+    # Chỉ giữ các cột quan trọng
+    result_cols = ["model", "threshold_default", "auc", "brier", "net_profit", 
+                   "approval_rate", "approved_default_rate"]
+    print(extended_df[result_cols].head(20))
+    
+   
+    # extended_df.to_csv("logit_lda_qda_tuning_results.csv", index=False)
+
+RUN_TUNING_EXTENDED = False
+
+#Lasso with C=0.01 , Profit: 50.75M (beats Ridge by ~0.24M)
+#Ridge performs consistently well. Best Ridge: C=2.0 (50.51M), C=20.0 (50.50M)
+# ElasticNet 50.57M
+#LDA best at shrinkage=0.0, Profit: 50.13M
+#QDA, 44.57M
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
