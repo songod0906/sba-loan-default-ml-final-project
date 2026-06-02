@@ -43,7 +43,7 @@ import matplotlib.pyplot as plt
 
 from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, FunctionTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 
@@ -60,7 +60,7 @@ from sklearn.metrics import (
 
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier, plot_tree
-from sklearn.ensemble import BaggingClassifier, RandomForestClassifier, AdaBoostClassifier
+from sklearn.ensemble import BaggingClassifier, RandomForestClassifier, AdaBoostClassifier, HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.neural_network import MLPClassifier
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticDiscriminantAnalysis
@@ -80,7 +80,7 @@ THEORETICAL_DEFAULT_THRESHOLD = 1 / 6
 
 # Fill your name here when you run your own copy.
 # This is just for notes / saved outputs. It does not affect the model.
-OWNER_NAME = ""
+OWNER_NAME = "HAI AN"
 
 
 #%% 2. Load data
@@ -211,17 +211,196 @@ print(df_model.columns)
 # - Is there any leakage risk in your ideas?
 
 # Write your EDA code here.
-# Example only:
-# hai_an_state_risk = df_model.groupby("State")["y"].agg(["count", "mean"]).sort_values("mean", ascending=False)
-# print(hai_an_state_risk.head(15))
+
+# ------------------------------------------------------------
+# 1. Target distribution
+# ------------------------------------------------------------
+
+print("\n1. TARGET DISTRIBUTION")
+target_table = df_model["y"].value_counts().rename(index={0: "Paid in Full", 1: "Default / Charged Off"})
+target_rate = df_model["y"].value_counts(normalize=True).rename(index={0: "Paid in Full", 1: "Default / Charged Off"})
+
+target_summary = pd.DataFrame({
+    "count": target_table,
+    "percentage": target_rate
+})
+
+print(target_summary)
+
+# Visualization: target distribution
+plt.figure(figsize=(6, 4))
+target_summary["percentage"].plot(kind="bar", edgecolor="black")
+plt.title("Loan Outcome Distribution")
+plt.ylabel("Percentage")
+plt.xlabel("Loan Status")
+plt.xticks(rotation=0)
+plt.tight_layout()
+plt.show()
+
+
+# ------------------------------------------------------------
+# 2. EDA observation 1: Term and default
+# ------------------------------------------------------------
+
+print("\n2. DEFAULT RATE BY TERM GROUP")
+
+df_model["term_group_temp"] = pd.cut(
+    df_model["Term"],
+    bins=[0, 36, 84, 120, 240, np.inf],
+    labels=["<=36 months", "37-84 months", "85-120 months", "121-240 months", ">240 months"]
+)
+
+term_risk = df_model.groupby("term_group_temp")["y"].agg(["count", "mean"]).reset_index()
+term_risk.columns = ["Term Group", "Loan Count", "Default Rate"]
+term_risk["Default Rate"] = term_risk["Default Rate"].round(4)
+
+print(term_risk)
+
+# Visualization: default rate by term group
+plt.figure(figsize=(8, 5))
+plt.bar(term_risk["Term Group"], term_risk["Default Rate"], edgecolor="black")
+plt.title("Default Rate by Loan Term Group")
+plt.ylabel("Default Rate")
+plt.xlabel("Term Group")
+plt.xticks(rotation=30, ha="right")
+plt.tight_layout()
+plt.show()
+
+
+# ------------------------------------------------------------
+# 3. EDA observation 2: SBA guarantee portion and default
+# ------------------------------------------------------------
+
+print("\n3. DEFAULT RATE BY SBA GUARANTEE PORTION")
+
+df_model["portion_temp"] = df_model["SBA_Appv"] / df_model["GrAppv"]
+df_model["portion_temp"] = df_model["portion_temp"].replace([np.inf, -np.inf], np.nan)
+
+df_model["portion_group_temp"] = pd.cut(
+    df_model["portion_temp"],
+    bins=[0, 0.5, 0.75, 0.9, 1.0],
+    labels=["<=50%", "51-75%", "76-90%", "91-100%"],
+    include_lowest=True
+)
+
+portion_risk = df_model.groupby("portion_group_temp")["y"].agg(["count", "mean"]).reset_index()
+portion_risk.columns = ["SBA Guarantee Portion", "Loan Count", "Default Rate"]
+portion_risk["Default Rate"] = portion_risk["Default Rate"].round(4)
+
+print(portion_risk)
+
+# Visualization: default rate by SBA guarantee portion
+plt.figure(figsize=(8, 5))
+plt.bar(portion_risk["SBA Guarantee Portion"].astype(str), portion_risk["Default Rate"], edgecolor="black")
+plt.title("Default Rate by SBA Guarantee Portion")
+plt.ylabel("Default Rate")
+plt.xlabel("SBA Guarantee Portion")
+plt.tight_layout()
+plt.show()
+
+
+# ------------------------------------------------------------
+# 4. EDA observation 3: State risk
+# ------------------------------------------------------------
+
+print("\n4. TOP STATES BY DEFAULT RATE")
+
+state_risk = (
+    df_model.groupby("State")["y"]
+    .agg(["count", "mean"])
+    .reset_index()
+)
+
+state_risk.columns = ["State", "Loan Count", "Default Rate"]
+
+# Avoid tiny states with too few observations
+state_risk_filtered = state_risk[state_risk["Loan Count"] >= 100].copy()
+state_risk_filtered = state_risk_filtered.sort_values("Default Rate", ascending=False)
+state_risk_filtered["Default Rate"] = state_risk_filtered["Default Rate"].round(4)
+
+print(state_risk_filtered.head(15))
+
+# Visualization: top 10 risky states
+top10_states = state_risk_filtered.head(10)
+
+plt.figure(figsize=(9, 5))
+plt.bar(top10_states["State"], top10_states["Default Rate"], edgecolor="black")
+plt.title("Top 10 States by Default Rate")
+plt.ylabel("Default Rate")
+plt.xlabel("State")
+plt.tight_layout()
+plt.show()
+
+
+# ------------------------------------------------------------
+# 5. Extra table: business type and urban/rural
+# ------------------------------------------------------------
+
+print("\n5. DEFAULT RATE BY BUSINESS TYPE AND URBAN/RURAL")
+
+business_location_table = pd.crosstab(
+    df_model["NewExist"],
+    df_model["UrbanRural"],
+    values=df_model["y"],
+    aggfunc="mean"
+)
+
+business_location_table = business_location_table.round(4)
+print(business_location_table)
+
+
+# ------------------------------------------------------------
+# 6. Clean temporary columns
+# ------------------------------------------------------------
+
+df_model = df_model.drop(
+    columns=["term_group_temp", "portion_temp", "portion_group_temp"],
+    errors="ignore"
+)
+
+
+# ------------------------------------------------------------
+# HAI AN NOTES
+# ------------------------------------------------------------
 
 # Hai An notes:
+
 # 1. EDA observation:
+#    The target variable is imbalanced. Most loans are paid in full, while a smaller portion
+#    are charged off/defaulted. This means accuracy alone can be misleading, because a model
+#    can look accurate by predicting most loans as paid. The team should compare models using
+#    AUC, recall for defaults, and especially validation net profit.
+
 # 2. EDA observation:
+#    Loan term appears to be a useful predictor. Different term groups show different default
+#    rates, which suggests that risk is not evenly distributed across loan maturity.
+#    This supports using Term directly and possibly creating a RealEstate feature where
+#    Term >= 240 months.
+
 # 3. EDA observation:
+#    SBA guarantee portion may contain useful risk information. The default rate changes across
+#    different guarantee-ratio groups, suggesting that the relationship between SBA_Appv and
+#    GrAppv can help explain loan risk better than using the raw dollar amounts alone.
+
 # Feature ideas:
+#    1. Portion = SBA_Appv / GrAppv. This captures the share of the loan guaranteed by SBA.
+#    2. RealEstate = 1 if Term >= 240 months, else 0. Long-term loans may behave differently
+#       and this is also used as a real-estate proxy.
+#    3. same_state_bank = 1 if State == BankState, else 0. Local lenders may have better
+#       information about borrowers.
+#    4. NAICS_sector = first two digits of NAICS. This captures broad industry risk.
+#    5. unguaranteed_amount = GrAppv - SBA_Appv. This captures the bank's exposure.
+
 # Leakage concern:
+#    Do not use MIS_Status, ChgOffDate, ChgOffPrinGr, or BalanceGross as predictors because
+#    they are known only after the loan outcome. DisbursementGross should also be handled
+#    carefully: in this workflow it is used for profit calculation, not as a default predictor.
+
 # Lending interpretation:
+#    The bank should not approve loans only based on whether the predicted class is paid/default.
+#    It should estimate P(default), then approve loans only when the expected profit is positive.
+#    Features such as Term, SBA guarantee portion, State, and UrbanRural can help separate safer
+#    loans from higher-risk loans before building KNN and tree-based models.
 
 
 #%% 6B. Part 1 EDA — Owner: Hai Anh
@@ -329,13 +508,61 @@ print(df_model.columns)
 # df_model["Recession_x_RealEstate"] = df_model["Recession"] * df_model["RealEstate"]
 
 # Add your own feature ideas below:
-#
-#
 
-# Quick check after you create features:
+# 1. SBA guarantee portion
+df_model["Portion"] = df_model["SBA_Appv"] / df_model["GrAppv"]
+df_model["Portion"] = df_model["Portion"].replace([np.inf, -np.inf], np.nan).fillna(0)
+
+df_model["unguaranteed_ratio"] = 1 - df_model["Portion"]
+df_model["unguaranteed_amount"] = df_model["GrAppv"] - df_model["SBA_Appv"]
+
+# 2. Job impact
+df_model["jobs_total"] = df_model["CreateJob"] + df_model["RetainedJob"]
+
+df_model["jobs_per_dollar"] = df_model["jobs_total"] / df_model["GrAppv"]
+df_model["jobs_per_dollar"] = df_model["jobs_per_dollar"].replace([np.inf, -np.inf], np.nan).fillna(0)
+
+# 3. Same-state lender
+df_model["same_state_bank"] = np.where(df_model["State"] == df_model["BankState"], 1, 0)
+
+# 4. Real-estate proxy
+df_model["RealEstate"] = np.where(df_model["Term"] >= 240, 1, 0)
+
+# 5. NAICS sector
+df_model["NAICS_str"] = (
+    df_model["NAICS"]
+    .astype(str)
+    .str.replace(".0", "", regex=False)
+    .str.zfill(6)
+)
+
+df_model["NAICS_sector"] = df_model["NAICS_str"].str[:2]
+
+# 6. Clean LowDoc and RevLineCr
+def clean_yes_no(series):
+    cleaned = series.astype(str).str.strip().str.upper()
+    cleaned = cleaned.replace({
+        "Y": "Yes", "YES": "Yes", "1": "Yes",
+        "N": "No", "NO": "No", "0": "No",
+        "NAN": "Unknown", "": "Unknown",
+    })
+    cleaned = np.where(pd.Series(cleaned).isin(["Yes", "No"]), cleaned, "Unknown")
+    return cleaned
+
+df_model["LowDoc_clean"] = clean_yes_no(df_model["LowDoc"])
+df_model["RevLineCr_clean"] = clean_yes_no(df_model["RevLineCr"])
+
+# 7. Log transforms
+for col in ["GrAppv", "SBA_Appv", "NoEmp"]:
+    if col in df_model.columns:
+        df_model[f"log_{col}"] = np.log1p(df_model[col])
+
+# 8. Simple interaction
+df_model["RealEstate_x_Portion"] = df_model["RealEstate"] * df_model["Portion"]
+
+
 print("Current df_model columns:")
 print(df_model.columns)
-
 
 #%% 8. Register predictors
 
@@ -351,24 +578,19 @@ numeric_cols = [
     "GrAppv",
     "SBA_Appv",
 
-    # Add engineered numeric features here after creating them in Block 7
-    # "Portion",
-    # "unguaranteed_ratio",
-    # "unguaranteed_amount",
-    # "jobs_total",
-    # "jobs_per_dollar",
-    # "same_state_bank",
-    # "RealEstate",
-    # "Recession",
-    # "approval_year",
-    # "disbursement_year",
-    # "log_GrAppv",
-    # "log_SBA_Appv",
-    # "log_NoEmp",
-    # "RealEstate_x_Portion",
-    # "Recession_x_Portion",
-    # "Recession_x_RealEstate",
+    "Portion",
+    "unguaranteed_ratio",
+    "unguaranteed_amount",
+    "jobs_total",
+    "jobs_per_dollar",
+    "same_state_bank",
+    "RealEstate",
+    "log_GrAppv",
+    "log_SBA_Appv",
+    "log_NoEmp",
+    "RealEstate_x_Portion",
 ]
+
 
 if USE_DISBURSEMENT_AS_PREDICTOR:
     numeric_cols += ["DisbursementGross"]
@@ -378,6 +600,9 @@ categorical_cols = [
     "BankState",
     "NewExist",
     "UrbanRural",
+    "NAICS_sector",
+    "LowDoc_clean",
+    "RevLineCr_clean",
 
     # Add engineered categorical features here after creating them in Block 7
     # "NAICS_sector",
@@ -474,7 +699,10 @@ preprocess_tree = ColumnTransformer(
         ("cat", categorical_transformer, categorical_cols),
     ]
 )
-
+preprocess_hgb = Pipeline(steps=[
+    ("preprocess", preprocess_tree),
+    ("to_dense", FunctionTransformer(lambda X: X.toarray() if hasattr(X, "toarray") else X))
+])
 
 #%% 12. Shared scoreboard functions
 
@@ -624,14 +852,54 @@ if RUN_KNN:
     # )
     # print(pd.DataFrame([knn_theory, knn_tuned]))
     # print(knn_threshold_table.head(10))
-    pass
+    knn_results = []
+
+    # Best KNN setting from CV:
+    # k = 51, weights = distance, p = 2
+    knn_best = KNeighborsClassifier(
+        n_neighbors=51,
+        weights="distance",
+        p=2,
+        n_jobs=-1
+    )
+
+    knn_pipe, knn_prob, knn_theory, knn_tuned, knn_threshold_table = fit_predict_evaluate(
+        "KNN_k51_distance",
+        knn_best,
+        preprocess_obj=preprocess_scaled
+    )
+
+    print("\nKNN validation results:")
+    print(pd.DataFrame([knn_theory, knn_tuned]))
+
+    print("\nTop 10 KNN thresholds by validation net profit:")
+    print(knn_threshold_table.head(10))
+
+    best_knn_tuned = knn_tuned
 
 # Hai An KNN notes:
 # First run result:
+# Best CV setting: k=51, weights="distance", p=2
 # Best validation threshold:
 # Validation net profit:
 # Approved default rate:
 # Interpretation:
+# KNN was evaluated using preprocess_scaled because it depends on distance.
+# The final KNN decision should be based on validation net profit, not AUC alone.
+
+# Hai An KNN notes:
+# First run result: Tested 8 models (k=11,31,51,101 × uniform/distance)
+#                  Best: KNN_k51_distance
+# Best validation threshold: 0.218 (if default prob > 0.218 → deny)
+# Validation net profit:     48,458,033.80
+# Approved default rate:     8.26% (of approved loans, 8.26% actually defaulted)
+# Interpretation:
+#   - distance weighting consistently beats uniform across all k values
+#   - k=51 is the sweet spot: k=11 is too noisy, k=101 over-smooths
+#     (recall increases but precision drops → too many good customers denied)
+#   - AUC=0.823, Brier=0.108 → probability calibration is reasonably good
+#   - Downside: ~29s runtime for k51_distance, slower than tree-based models
+
 
 
 #%% 14B. Decision tree / bagging / random forest / boosting workspace — Owner: Hai An
@@ -651,14 +919,181 @@ if RUN_TREE_MODELS:
     #
     # Example result names you can use:
     # tree_tuned, bag_tuned, rf_tuned, boost_tuned
-    pass
+    tree_results = []
+
+    # ------------------------------------------------------------
+    # Candidate 1: Random Forest primary candidate
+    # Best CV AUC setting
+    # ------------------------------------------------------------
+
+    rf_primary = RandomForestClassifier(
+        n_estimators=100,
+        max_depth=12,
+        min_samples_leaf=50,
+        max_features=None,
+        random_state=RANDOM_STATE,
+        n_jobs=-1
+    )
+
+    rf_primary_pipe, rf_primary_prob, rf_primary_theory, rf_primary_tuned, rf_primary_threshold_table = fit_predict_evaluate(
+        "RF_depth12_leaf50_maxfeatNone",
+        rf_primary,
+        preprocess_obj=preprocess_tree
+    )
+
+    tree_results.append(rf_primary_tuned)
+
+    print("\nRandom Forest primary candidate validation results:")
+    print(pd.DataFrame([rf_primary_theory, rf_primary_tuned]))
+
+    print("\nTop 10 RF primary thresholds by validation net profit:")
+    print(rf_primary_threshold_table.head(10))
+
+
+    # ------------------------------------------------------------
+    # Candidate 2: Random Forest robustness check
+    # Feature randomness version
+    # ------------------------------------------------------------
+
+    rf_half_features = RandomForestClassifier(
+        n_estimators=100,
+        max_depth=12,
+        min_samples_leaf=50,
+        max_features=0.5,
+        random_state=RANDOM_STATE,
+        n_jobs=-1
+    )
+
+    rf_half_pipe, rf_half_prob, rf_half_theory, rf_half_tuned, rf_half_threshold_table = fit_predict_evaluate(
+        "RF_depth12_leaf50_maxfeat0.5",
+        rf_half_features,
+        preprocess_obj=preprocess_tree
+    )
+
+    tree_results.append(rf_half_tuned)
+
+    print("\nRandom Forest max_features=0.5 candidate validation results:")
+    print(pd.DataFrame([rf_half_theory, rf_half_tuned]))
+
+    print("\nTop 10 RF max_features=0.5 thresholds by validation net profit:")
+    print(rf_half_threshold_table.head(10))
+
+    # ------------------------------------------------------------
+    # Candidate 3: HistGradientBoosting baseline from team lead
+    # ------------------------------------------------------------
+
+    hgb_team = HistGradientBoostingClassifier(
+        max_iter=200,
+        learning_rate=0.05,
+        max_leaf_nodes=31,
+        random_state=RANDOM_STATE
+    )
+
+    hgb_team_pipe, hgb_team_prob, hgb_team_theory, hgb_team_tuned, hgb_team_threshold_table = fit_predict_evaluate(
+        "HGB_iter200_lr0.05_leaf31",
+        hgb_team,
+        preprocess_obj=preprocess_hgb
+    )
+
+    tree_results.append(hgb_team_tuned)
+
+    print("\nHistGradientBoosting team config validation results:")
+    print(pd.DataFrame([hgb_team_theory, hgb_team_tuned]))
+
+    print("\nTop 10 HGB team config thresholds by validation net profit:")
+    print(hgb_team_threshold_table.head(10))
+
+
+    # ------------------------------------------------------------
+    # Candidate 4: HistGradientBoosting tuning around team config
+    # ------------------------------------------------------------
+
+    hgb_grid_results = []
+
+    for max_iter in [150, 200, 250]:
+        for learning_rate in [0.03, 0.05, 0.08]:
+            for max_leaf_nodes in [15, 31, 63]:
+                hgb = HistGradientBoostingClassifier(
+                    max_iter=max_iter,
+                    learning_rate=learning_rate,
+                    max_leaf_nodes=max_leaf_nodes,
+                    random_state=RANDOM_STATE
+                )
+
+                hgb_pipe, hgb_prob, hgb_theory, hgb_tuned, hgb_threshold_table = fit_predict_evaluate(
+                    f"HGB_iter{max_iter}_lr{learning_rate}_leaf{max_leaf_nodes}",
+                    hgb,
+                    preprocess_obj=preprocess_hgb
+                )
+
+                hgb_grid_results.append(hgb_tuned)
+                tree_results.append(hgb_tuned)
+
+                print(
+                    f"HGB iter={max_iter}, lr={learning_rate}, leaf={max_leaf_nodes}: "
+                    f"profit={hgb_tuned['net_profit']:,.2f}, "
+                    f"threshold={hgb_tuned['threshold_default']:.3f}"
+                )
+
+    hgb_grid_df = pd.DataFrame(hgb_grid_results).sort_values(
+        "net_profit",
+        ascending=False
+    ).reset_index(drop=True)
+
+    print("\nBest HGB tuning results:")
+    print(hgb_grid_df.head(10))
+    
+    # ------------------------------------------------------------
+    # Compare tree-family candidates
+    # ------------------------------------------------------------
+
+    tree_results_df = pd.DataFrame(tree_results).sort_values(
+        "net_profit",
+        ascending=False
+    ).reset_index(drop=True)
+
+    print("\nTree-family validation comparison:")
+    print(tree_results_df)
+
+    best_tree_tuned = tree_results_df.iloc[0].to_dict()
+
+    print("\nBest tree-family model:")
+    print(best_tree_tuned)
 
 # Hai An tree-family notes:
-# Best tree result:
-# Best bagging result:
+# Feature set:
+# Basic SBA numeric fields plus engineered Hai An features:
+# Portion, unguaranteed_ratio, unguaranteed_amount, jobs_total,
+# jobs_per_dollar, same_state_bank, RealEstate, log_GrAppv,
+# log_SBA_Appv, log_NoEmp, RealEstate_x_Portion,
+# and categorical features State, BankState, NewExist, UrbanRural,
+# NAICS_sector, LowDoc_clean, RevLineCr_clean.
+#
 # Best RF result:
-# Best boosting result:
+# RF_depth12_leaf50_maxfeatNone
+# Validation profit = 66,333,240.30
+# Threshold = 0.1687
+# AUC = 0.9523
+#
+# HGB team config:
+# HGB_iter200_lr0.05_leaf31
+# Validation profit = 67,543,479.55
+# Threshold = 0.1092
+# AUC = 0.9606
+#
+# Best HGB tuning result:
+# HGB_iter250_lr0.08_leaf63
+# Validation profit = 68,323,835.70
+# Threshold = 0.0893
+# AUC = 0.9609
+# Approval rate = 71.46%
+# Approved default rate = 1.67%
+#
 # Interpretation:
+# HistGradientBoosting outperformed Random Forest on validation profit using Hai An's feature set.
+# The best HGB model uses a stricter default threshold, approving loans only when predicted
+# default probability is <= 8.93%. This improves profit by reducing approved defaults while
+# still approving about 71% of validation loans. Test set was not used.
 
 
 #%% 14C. Logistic regression and discriminant analysis workspace — Owner: Hai Anh
@@ -756,11 +1191,59 @@ if RUN_KNN_CV:
     #         scores = cross_val_score(candidate, X_train, y_train, cv=cv, scoring="roc_auc", n_jobs=-1)
     #         add_cv_result("Hai An", "KNN", {"k": k, "weights": w}, scores)
     #         print(k, w, scores.mean())
-    pass
+    
+if RUN_KNN_CV:
+    cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=RANDOM_STATE)
+
+    knn_cv_results = []
+
+    k_values = [11, 31, 51, 101]
+    weights_options = ["uniform", "distance"]
+
+    for k in k_values:
+        for w in weights_options:
+            candidate = Pipeline(steps=[
+                ("preprocess", preprocess_scaled),
+                ("model", KNeighborsClassifier(
+                    n_neighbors=k,
+                    weights=w,
+                    p=2,
+                    n_jobs=-1
+                )),
+            ])
+
+            scores = cross_val_score(
+                candidate,
+                X_train,
+                y_train,
+                cv=cv,
+                scoring="roc_auc",
+                n_jobs=-1
+            )
+
+            result = {
+                "owner": "Hai An",
+                "model_family": "KNN",
+                "params": {"k": k, "weights": w, "p": 2},
+                "cv_auc_mean": float(np.mean(scores)),
+                "cv_auc_std": float(np.std(scores)),
+            }
+
+            knn_cv_results.append(result)
+            add_cv_result("Hai An", "KNN", {"k": k, "weights": w, "p": 2}, scores)
+
+            print(f"KNN k={k}, weights={w}: CV AUC = {scores.mean():.4f} (+/- {scores.std():.4f})")
+
+    knn_cv_df = pd.DataFrame(knn_cv_results).sort_values("cv_auc_mean", ascending=False)
+    print("\nBest KNN CV results:")
+    print(knn_cv_df)
 
 # Hai An KNN CV notes:
-# Best CV setting:
+# Best CV setting:      k=51, weights="distance", p=2 → CV AUC = 0.8301 ± 0.0058
 # Did CV agree with validation profit?
+#   Yes - both methods ranked k=51 distance as #1 and k=11 as worst.
+#   distance consistently beats uniform at every k value in both CV and validation.
+#   CV is trustworthy for KNN hyperparameter selection on this dataset.
 
 
 #%% 15B. Tree-family cross-validation — Owner: Hai An
@@ -797,11 +1280,72 @@ if RUN_TREE_CV:
     #                 "max_features": max_feat,
     #             }, scores)
     #             print(depth, leaf, max_feat, scores.mean())
-    pass
+    
+if RUN_TREE_CV:
+    cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=RANDOM_STATE)
+
+    tree_cv_results = []
+
+    for depth in [12, 16]:
+        for leaf in [50, 100]:
+            for max_feat in [None, 0.5, "sqrt"]:
+                candidate = Pipeline(steps=[
+                    ("preprocess", preprocess_tree),
+                    ("model", RandomForestClassifier(
+                        n_estimators=50,
+                        max_depth=depth,
+                        min_samples_leaf=leaf,
+                        max_features=max_feat,
+                        n_jobs=1,
+                        random_state=RANDOM_STATE,
+                    )),
+                ])
+
+                scores = cross_val_score(
+                    candidate,
+                    X_train,
+                    y_train,
+                    cv=cv,
+                    scoring="roc_auc",
+                    n_jobs=-1
+                )
+
+                params = {
+                    "max_depth": depth,
+                    "min_samples_leaf": leaf,
+                    "max_features": max_feat,
+                    "n_estimators": 50,
+                }
+
+                result = {
+                    "owner": "Hai An",
+                    "model_family": "Random Forest",
+                    "params": params,
+                    "cv_auc_mean": float(np.mean(scores)),
+                    "cv_auc_std": float(np.std(scores)),
+                }
+
+                tree_cv_results.append(result)
+                add_cv_result("Hai An", "Random Forest", params, scores)
+
+                print(
+                    f"RF depth={depth}, leaf={leaf}, max_features={max_feat}: "
+                    f"CV AUC = {scores.mean():.4f} (+/- {scores.std():.4f})"
+                )
+
+    tree_cv_df = pd.DataFrame(tree_cv_results).sort_values("cv_auc_mean", ascending=False)
+    print("\nBest Tree-family CV results:")
+    print(tree_cv_df)
 
 # Hai An tree CV notes:
-# Best CV setting:
+# Best CV setting:    depth=12, leaf=50, max_features=None → CV AUC = 0.9516 ± 0.0016
+#                     (depth=16 identical — prefer depth=12 for simplicity)
 # Did max_features matter?
+#   Yes, hugely - the single most important parameter in this grid.
+#   None >> 0.5 >> sqrt, with sqrt dropping ~0.06-0.07 AUC below None.
+#   max_depth barely mattered (12 vs 16 gap < 0.0001).
+#   min_samples_leaf had a small consistent effect (50 > 100).
+#   Conclusion: always use max_features=None for this dataset.
 
 
 #%% 15C. Logistic / discriminant cross-validation — Owner: Hai Anh
@@ -905,6 +1449,14 @@ else:
 # Which settings are worth taking to validation?
 #
 #
+# → 3 candidates only:
+#   1. RF: depth=12, leaf=50, max_features=None  (top CV AUC = 0.9516, primary candidate)
+#   2. RF: depth=12, leaf=50, max_features=0.5   (CV AUC = 0.9468, sanity check on max_features)
+#   3. KNN: k=51, distance                        (CV AUC = 0.8301, best KNN representative)
+#
+# Skip depth=16 (identical to 12), sqrt (too weak), leaf=100 (consistently worse),
+# and all weaker KNN variants - already settled from earlier validation run.
+
 
 
 #%% 16. Build validation leaderboard
