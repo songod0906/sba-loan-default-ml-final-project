@@ -1,34 +1,21 @@
 # -*- coding: utf-8 -*-
 """
-SBA Final Project — Main Workflow Lab Template
+SBA Final Project — Main Workflow (Uniform Version)
+Shared feature set v1 — all teammates use identical features, split, and scoring.
 
-How to use it:
-1. Run the early setup blocks together.
-2. Use the EDA and feature blocks to explore your own ideas.
-3. When a feature becomes part of the shared model, add it to df_model and register it in
-   numeric_cols or categorical_cols.
-4. Each teammate works inside their assigned model block.
-5. We compare everyone with the same validation scoreboard.
-6. Set model = True to run, for example:
-    RUN_TREE_MODELS = True
+Owners:
+  Hai An   — KNN, Tree-family (DT/Bagging/RF/AdaBoost/HGB)
+  Hai Anh  — Logistic Regression, LDA, QDA
+  Huyen Anh — Neural Network
 
-Important notes:
-- Your private EDA variables can have any names.
-- The shared model only reads these names:
-    df_model
-    y
-    amount
-    numeric_cols
-    categorical_cols
-    X_train, X_valid, X_test
-    y_train, y_valid, y_test
-    amount_train, amount_valid, amount_test
-    preprocess_scaled, preprocess_tree
+Shared variables (do not rename):
+  df_model, y, amount, numeric_cols, categorical_cols
+  X_train, X_valid, X_test, y_train, y_valid, y_test
+  amount_train, amount_valid, amount_test
+  preprocess_scaled, preprocess_scaled_dense, preprocess_tree, preprocess_hgb
+  fit_predict_evaluate(), evaluate_prob_model(), tune_threshold_by_profit()
 
-That means you have freedom while exploring, but our final model still follows the rules above.
-
-Dataset expected in this folder:
-SBAnational.csv
+Dataset: SBAnational.csv
 """
 
 #%% 1. Import libraries
@@ -43,19 +30,13 @@ import matplotlib.pyplot as plt
 
 from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, FunctionTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 
 from sklearn.metrics import (
-    confusion_matrix,
-    accuracy_score,
-    precision_score,
-    recall_score,
-    f1_score,
-    roc_auc_score,
-    roc_curve,
-    brier_score_loss,
+    confusion_matrix, accuracy_score, precision_score, recall_score,
+    f1_score, roc_auc_score, roc_curve, brier_score_loss,
 )
 
 from sklearn.neighbors import KNeighborsClassifier
@@ -65,155 +46,82 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.neural_network import MLPClassifier
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticDiscriminantAnalysis
 
+try:
+    from sklearn.ensemble import HistGradientBoostingClassifier
+    _HAS_HIST_GB = True
+except ImportError:
+    _HAS_HIST_GB = False
+
 pd.set_option("display.max_columns", None)
-pd.set_option("display.width", 160)
+pd.set_option("display.width", 200)
 
 RANDOM_STATE = 1
 DATA_PATH = "SBAnational.csv"
-
-# Keep this True while learning / debugging.
-# For the final full run, change it to False.
 USE_WORKING_SAMPLE = True
 WORKING_SAMPLE_N = 50000
-
 THEORETICAL_DEFAULT_THRESHOLD = 1 / 6
-
-# Fill your name here when you run your own copy.
-# This is just for notes / saved outputs. It does not affect the model.
-OWNER_NAME = ""
 
 
 #%% 2. Load data
 
 df_raw = pd.read_csv(DATA_PATH)
-
 print("Rows, columns:", df_raw.shape)
-print(df_raw.head())
-print(df_raw.columns)
 
 
 #%% 3. Create target and clean money columns
 
-# y = 1 means default / charged off.
-# y = 0 means paid in full.
-
-# Always restart from df_raw so rerunning cells does not stack changes.
 df = df_raw.copy()
-
 print("MIS_Status distribution before cleaning:")
 print(df["MIS_Status"].value_counts(dropna=False))
-
-# Remove rows with missing target.
 df = df[df["MIS_Status"].notna()].copy()
-
 df["y"] = np.where(df["MIS_Status"] == "CHGOFF", 1, 0)
-
-print("Target distribution:")
-print(df["y"].value_counts())
+print("Target distribution:"); print(df["y"].value_counts())
 print("Default rate:", df["y"].mean())
 
-# Money columns are stored like "$60,000.00". Convert them to float.
 money_cols = ["DisbursementGross", "GrAppv", "SBA_Appv", "BalanceGross", "ChgOffPrinGr"]
-
 for col in money_cols:
     if col in df.columns:
         df[col] = (
-            df[col]
-            .astype(str)
-            .str.replace("$", "", regex=False)
-            .str.replace(",", "", regex=False)
-            .str.strip()
-            .replace({"nan": np.nan, "": np.nan})
-            .astype(float)
+            df[col].astype(str)
+            .str.replace("$", "", regex=False).str.replace(",", "", regex=False)
+            .str.strip().replace({"nan": np.nan, "": np.nan}).astype(float)
         )
-
-print(df[[c for c in money_cols if c in df.columns]].head())
 
 
 #%% 4. Optional working sample
 
-# This keeps the file fast while we are learning.
-# Stratify keeps the default/non-default ratio similar.
-
 if USE_WORKING_SAMPLE:
     sample_n = min(WORKING_SAMPLE_N, len(df))
-
     if sample_n < len(df):
-        df, _ = train_test_split(
-            df,
-            train_size=sample_n,
-            random_state=RANDOM_STATE,
-            stratify=df["y"],
-        )
-
+        df, _ = train_test_split(df, train_size=sample_n, random_state=RANDOM_STATE, stratify=df["y"])
     df = df.sort_index().copy()
-    print("Using working sample:", df.shape)
-    print("Sample default rate:", df["y"].mean())
-else:
-    print("Using full dataset:", df.shape)
+    print("Using working sample:", df.shape, "default rate:", df["y"].mean())
 
 
 #%% 5. Leakage audit and modeling dataframe
 
-# Question:
-# Which columns would not be known when the bank is deciding whether to approve the loan?
-# Remove those columns from X.
-
-leakage_cols = [
-    "MIS_Status",
-    "ChgOffDate",
-    "ChgOffPrinGr",
-    "BalanceGross",
-]
-
-id_text_cols = [
-    "LoanNr_ChkDgt",
-    "Name",
-    "City",
-    "Zip",
-    "Bank",
-]
-
-# DisbursementGross is used for profit calculation.
-# Decide separately whether it should be used as a predictor. What do you think, explain your decision
+leakage_cols = ["MIS_Status", "ChgOffDate", "ChgOffPrinGr", "BalanceGross"]
+id_text_cols = ["LoanNr_ChkDgt", "Name", "City", "Zip", "Bank"]
 USE_DISBURSEMENT_AS_PREDICTOR = False
 
 df_model = df.drop(columns=leakage_cols + id_text_cols, errors="ignore").copy()
-
 print("Model dataframe shape:", df_model.shape)
-print(df_model.columns)
 
-# Answer / notes:
-#
-#
+# Notes: DisbursementGross kept for profit calculation and log transform.
+# It is NOT added as a raw predictor unless USE_DISBURSEMENT_AS_PREDICTOR = True.
 
 
 #%% 6. Part 1 EDA workspace — everyone does this first
-
-# Rule:
-# Use any variable names you want here.
-# Your private EDA code will not affect the shared model unless you later create a column in df_model
-# and register it in numeric_cols or categorical_cols.
 
 # Required Part 1 output for everyone:
 # 1. Three EDA observations
 # 2. Two possible feature ideas
 # 3. One leakage concern
 # 4. Table and Visualization
-# 5. One short interpretation for the bank. 
+# 5. One short interpretation for the bank.
 
 
 #%% 6A. Part 1 EDA — Owner: Hai An
-
-# Questions to answer:
-# - Which variables look useful before modeling?
-# - Which feature ideas do you want to try?
-# - Is there any leakage risk in your ideas?
-
-# Write your EDA code here.
-# Example only:
-# hai_an_state_risk = df_model.groupby("State")["y"].agg(["count", "mean"]).sort_values("mean", ascending=False)
-# print(hai_an_state_risk.head(15))
 
 # Hai An notes:
 # 1. EDA observation:
@@ -227,225 +135,195 @@ print(df_model.columns)
 #%% 6B. Part 1 EDA — Owner: Hai Anh
 
 # Write your EDA code here.
-# Focus idea: variables that may help logistic regression, LDA, or QDA.
-# Example only:
-# hai_anh_term_summary = df_model.groupby("y")["Term"].median()
-# print(hai_anh_term_summary)
+# 1. EDA observation: Term differs clearly between default and non-default
+term_summary = df_model.groupby("y")["Term"].describe()
+print("Term summary by default status:")
+print(term_summary)
+
+# 2. EDA observation: NewExist might be a distinguishing factor
+new_exist_summary = df_model.groupby("NewExist")["y"].agg(["count", "mean"]).sort_values("mean", ascending=False)
+print("\nNewExist summary:")
+print(new_exist_summary)
+
+# 3. EDA observation: UrbanRural might have a mild effect
+urban_rural_summary = df_model.groupby("UrbanRural")["y"].agg(["count", "mean"]).sort_values("mean", ascending=False)
+print("\nUrbanRural summary:")
+print(urban_rural_summary)
 
 # Hai Anh notes:
-# 1. EDA observation:
-# 2. EDA observation:
-# 3. EDA observation:
-# Feature ideas:
-# Leakage concern:
-# Lending interpretation:
+# 1. EDA observation: Term differs strongly — defaulted loans have shorter terms (~58 months vs ~122 months)
+# 2. EDA observation: NewExist = 2 (Existing business) has highest default rate (~18.9%)
+# 3. EDA observation: UrbanRural = 1 (Urban) has highest default rate (~24.3%)
+# Feature ideas: log(Term), is_urban dummy, NewExist × UrbanRural interaction
+# Leakage concern: "Unknown" categories may correlate with loan performance
+# Lending interpretation: Shorter-term loans riskier → require stronger collateral
 
 
 #%% 6C. Part 1 EDA — Owner: Huyen Anh
 
-# Write your EDA code here.
-# Focus idea: patterns that may require nonlinear models or interactions.
-# Example only:
-# huyen_anh_revline = df_model.groupby("RevLineCr")["y"].agg(["count", "mean"]).sort_values("mean", ascending=False)
-# print(huyen_anh_revline.head(15))
+# Idea 1: Does RevLineCr (revolving credit) predict default?
+huyen_anh_revline = df_model.groupby("RevLineCr")["y"].agg(["count", "mean"])
+print(huyen_anh_revline)
+
+# Idea 2: Is loan term nonlinearly related to default?
+df_model.groupby(pd.cut(df_model["Term"], bins=10))["y"].mean().plot(kind="bar")
+plt.title("Default rate by Term bucket")
+plt.tight_layout()
+plt.show()
+
+# Idea 3: Does LowDoc interact with loan size?
+huyen_anh_lowdoc = df_model.groupby("LowDoc")["y"].agg(["count", "mean"])
+print(huyen_anh_lowdoc)
 
 # Huyen Anh notes:
-# 1. EDA observation:
-# 2. EDA observation:
-# 3. EDA observation:
-# Feature ideas:
-# Leakage concern:
-# Lending interpretation:
+# 1. EDA observation: Revolvers (Y) default ~25% vs non-revolvers (N) ~15%. Dirty values need cleaning.
+# 2. EDA observation: Term has U-shaped pattern — very short loans (~50% default), mid-range (~4-6%)
+# 3. EDA observation: LowDoc=Y has only ~9% default (counterintuitive — low-doc borrowers may be more established)
+# Feature ideas: Clean RevLineCr into Yes/No/Unknown, create RealEstate flag (Term >= 240)
+# Leakage concern: DisbursementDate is post-approval timing
+# Lending interpretation: NN well-suited for nonlinear Term pattern and LowDoc×RevLineCr interactions
 
 
-#%% 7. Shared feature engineering workspace
-
-# Rule:
-# If your feature should be used by the team, create it here with a stable column name.
-# Then register the column in Block 8.
-
-# Starter features from our teaching file are listed below.
-# They are comments on purpose. Choose necessary features based on your reasoning. 
+#%% 7. Shared feature engineering — feature set v1
 
 # 7.1 SBA guarantee portion
-# df_model["Portion"] = df_model["SBA_Appv"] / df_model["GrAppv"]
-# df_model["Portion"] = df_model["Portion"].replace([np.inf, -np.inf], np.nan).fillna(0)
-# df_model["unguaranteed_ratio"] = 1 - df_model["Portion"]
-# df_model["unguaranteed_amount"] = df_model["GrAppv"] - df_model["SBA_Appv"]
+df_model["Portion"] = df_model["SBA_Appv"] / df_model["GrAppv"]
+df_model["unguaranteed_ratio"] = 1 - df_model["Portion"]
+df_model["unguaranteed_amount"] = df_model["GrAppv"] - df_model["SBA_Appv"]
 
 # 7.2 Job impact
-# df_model["jobs_total"] = df_model["CreateJob"] + df_model["RetainedJob"]
-# df_model["jobs_per_dollar"] = df_model["jobs_total"] / df_model["GrAppv"]
-# df_model["jobs_per_dollar"] = df_model["jobs_per_dollar"].replace([np.inf, -np.inf], np.nan).fillna(0)
+df_model["jobs_total"] = df_model["CreateJob"] + df_model["RetainedJob"]
+df_model["jobs_per_dollar"] = df_model["jobs_total"] / df_model["GrAppv"]
 
 # 7.3 Same-state lender
-# df_model["same_state_bank"] = np.where(df_model["State"] == df_model["BankState"], 1, 0)
+df_model["same_state_bank"] = np.where(df_model["State"] == df_model["BankState"], 1, 0)
 
 # 7.4 Real-estate proxy
-# df_model["RealEstate"] = np.where(df_model["Term"] >= 240, 1, 0)
+df_model["RealEstate"] = np.where(df_model["Term"] >= 240, 1, 0)
 
-# 7.5 Date / recession features
-# for col in ["ApprovalDate", "DisbursementDate"]:
-#     df_model[col] = pd.to_datetime(df_model[col], errors="coerce")
-#
-# recession_start = pd.Timestamp("2007-12-01")
-# recession_end = pd.Timestamp("2009-06-30")
-# df_model["estimated_maturity_date"] = df_model["DisbursementDate"] + pd.to_timedelta(df_model["Term"].fillna(0) * 30, unit="D")
-# df_model["Recession"] = np.where(
-#     (df_model["DisbursementDate"] <= recession_end) &
-#     (df_model["estimated_maturity_date"] >= recession_start),
-#     1,
-#     0,
-# )
-# df_model["approval_year"] = df_model["ApprovalDate"].dt.year
-# df_model["disbursement_year"] = df_model["DisbursementDate"].dt.year
+# 7.5 Date-derived features
+for col in ["ApprovalDate", "DisbursementDate"]:
+    df_model[col] = pd.to_datetime(df_model[col], errors="coerce")
+
+recession_start = pd.Timestamp("2007-12-01")
+recession_end = pd.Timestamp("2009-06-30")
+df_model["estimated_maturity_date"] = df_model["DisbursementDate"] + pd.to_timedelta(df_model["Term"].fillna(0) * 30, unit="D")
+df_model["Recession"] = np.where(
+    (df_model["DisbursementDate"] <= recession_end) &
+    (df_model["estimated_maturity_date"] >= recession_start), 1, 0)
+
+df_model["approval_year"] = df_model["ApprovalDate"].dt.year
+df_model["disbursement_year"] = df_model["DisbursementDate"].dt.year
+
+df_model["ApprovalFY_clean"] = (
+    df_model["ApprovalFY"].astype(str).str.replace("A", "", regex=False).str.strip()
+)
+df_model["ApprovalFY_clean"] = pd.to_numeric(df_model["ApprovalFY_clean"], errors="coerce")
+
+df_model.drop(columns=["ApprovalDate", "DisbursementDate", "estimated_maturity_date"], errors="ignore", inplace=True)
 
 # 7.6 NAICS sector
-# df_model["NAICS_str"] = df_model["NAICS"].astype(str).str.replace(".0", "", regex=False).str.zfill(6)
-# df_model["NAICS_sector"] = df_model["NAICS_str"].str[:2]
+df_model["NAICS_str"] = df_model["NAICS"].astype(str).str.replace(".0", "", regex=False).str.zfill(6)
+df_model["NAICS_sector"] = df_model["NAICS_str"].str[:2]
+df_model.drop(columns=["NAICS_str"], errors="ignore", inplace=True)
 
 # 7.7 Clean LowDoc and RevLineCr
-# def clean_yes_no(series):
-#     cleaned = series.astype(str).str.strip().str.upper()
-#     cleaned = cleaned.replace({
-#         "Y": "Yes", "YES": "Yes", "1": "Yes",
-#         "N": "No", "NO": "No", "0": "No",
-#         "NAN": "Unknown", "": "Unknown",
-#     })
-#     cleaned = np.where(pd.Series(cleaned).isin(["Yes", "No"]), cleaned, "Unknown")
-#     return cleaned
-#
-# df_model["LowDoc_clean"] = clean_yes_no(df_model["LowDoc"])
-# df_model["RevLineCr_clean"] = clean_yes_no(df_model["RevLineCr"])
+def clean_yes_no(series):
+    cleaned = series.astype(str).str.strip().str.upper()
+    cleaned = cleaned.replace({
+        "Y": "Yes", "YES": "Yes", "1": "Yes",
+        "N": "No", "NO": "No", "0": "No",
+        "NAN": "Unknown", "": "Unknown",
+    })
+    cleaned = np.where(pd.Series(cleaned).isin(["Yes", "No"]), cleaned, "Unknown")
+    return cleaned
+
+df_model["LowDoc_clean"] = clean_yes_no(df_model["LowDoc"])
+df_model["RevLineCr_clean"] = clean_yes_no(df_model["RevLineCr"])
 
 # 7.8 Log transforms
-# for col in ["GrAppv", "SBA_Appv", "DisbursementGross", "NoEmp"]:
-#     if col in df_model.columns:
-#         df_model[f"log_{col}"] = np.log1p(df_model[col])
+for col in ["GrAppv", "SBA_Appv", "NoEmp", "DisbursementGross"]:
+    if col in df_model.columns:
+        df_model[f"log_{col}"] = np.log1p(df_model[col])
 
-# 7.9 Interaction ideas
-# df_model["RealEstate_x_Portion"] = df_model["RealEstate"] * df_model["Portion"]
-# df_model["Recession_x_Portion"] = df_model["Recession"] * df_model["Portion"]
-# df_model["Recession_x_RealEstate"] = df_model["Recession"] * df_model["RealEstate"]
+# 7.9 Interaction terms
+df_model["RealEstate_x_Portion"] = df_model["RealEstate"] * df_model["Portion"]
+df_model["Recession_x_Portion"] = df_model["Recession"] * df_model["Portion"]
+df_model["Recession_x_RealEstate"] = df_model["Recession"] * df_model["RealEstate"]
 
-# Add your own feature ideas below:
-#
-#
+# Replace inf/-inf with NaN (imputers handle NaN)
+float_cols = df_model.select_dtypes(include=[np.floating]).columns
+df_model[float_cols] = df_model[float_cols].replace([np.inf, -np.inf], np.nan)
 
-# Quick check after you create features:
-print("Current df_model columns:")
-print(df_model.columns)
+print("df_model shape:", df_model.shape)
 
 
-#%% 8. Register predictors
-
-# This is the shared lists.
-# If a feature is not listed here, the model will not use it.
+#%% 8. Register predictors — feature set v1 (24 numeric + 7 categorical)
 
 numeric_cols = [
-    # Basic SBA numeric fields
-    "Term",
-    "NoEmp",
-    "CreateJob",
-    "RetainedJob",
-    "GrAppv",
-    "SBA_Appv",
-
-    # Add engineered numeric features here after creating them in Block 7
-    # "Portion",
-    # "unguaranteed_ratio",
-    # "unguaranteed_amount",
-    # "jobs_total",
-    # "jobs_per_dollar",
-    # "same_state_bank",
-    # "RealEstate",
-    # "Recession",
-    # "approval_year",
-    # "disbursement_year",
-    # "log_GrAppv",
-    # "log_SBA_Appv",
-    # "log_NoEmp",
-    # "RealEstate_x_Portion",
-    # "Recession_x_Portion",
-    # "Recession_x_RealEstate",
+    "Term", "NoEmp", "CreateJob", "RetainedJob", "GrAppv", "SBA_Appv",
+    "Portion", "unguaranteed_ratio", "unguaranteed_amount",
+    "jobs_total", "jobs_per_dollar", "same_state_bank",
+    "RealEstate", "Recession", "approval_year", "disbursement_year",
+    "ApprovalFY_clean", "log_GrAppv", "log_SBA_Appv", "log_NoEmp",
+    "log_DisbursementGross", "RealEstate_x_Portion",
+    "Recession_x_Portion", "Recession_x_RealEstate",
 ]
 
 if USE_DISBURSEMENT_AS_PREDICTOR:
     numeric_cols += ["DisbursementGross"]
 
 categorical_cols = [
-    "State",
-    "BankState",
-    "NewExist",
-    "UrbanRural",
-
-    # Add engineered categorical features here after creating them in Block 7
-    # "NAICS_sector",
-    # "LowDoc_clean",
-    # "RevLineCr_clean",
+    "State", "BankState", "NewExist", "UrbanRural",
+    "NAICS_sector", "LowDoc_clean", "RevLineCr_clean",
 ]
 
-# Keep only columns that actually exist.
 numeric_cols = [c for c in numeric_cols if c in df_model.columns]
 categorical_cols = [c for c in categorical_cols if c in df_model.columns]
 
-print("Numeric predictors:", numeric_cols)
-print("Categorical predictors:", categorical_cols)
-
-# Answer / notes:
-# Why did you choose these predictors?
-#
-#
+print(f"Numeric: {len(numeric_cols)}, Categorical: {len(categorical_cols)}")
 
 
 #%% 9. Build X, y, and amount
 
 X = df_model[numeric_cols + categorical_cols].copy()
-y = df["y"].copy()
-amount = df["DisbursementGross"].copy()
+y = df_model["y"].copy()
+amount = df_model["DisbursementGross"].copy()
 
-# Convert categorical columns to string before one-hot encoding.
 for col in categorical_cols:
     X[col] = X[col].fillna("Unknown").astype(str)
 
-print("X shape:", X.shape)
-print("y default rate:", y.mean())
-print("Amount missing values:", amount.isna().sum())
+print("X shape:", X.shape, "default rate:", y.mean())
 
 
-#%% 10. Train / validation / test split
-
-# Use 60% train, 20% validation, 20% test.
-# Validation is where we compare models and tune thresholds.
-# Test stays untouched until the end.
+#%% 10. Train / validation / test split (60/20/20)
 
 X_train_valid, X_test, y_train_valid, y_test, amount_train_valid, amount_test = train_test_split(
-    X,
-    y,
-    amount,
-    test_size=0.20,
-    random_state=RANDOM_STATE,
-    stratify=y,
-)
+    X, y, amount, test_size=0.20, random_state=RANDOM_STATE, stratify=y)
 
 X_train, X_valid, y_train, y_valid, amount_train, amount_valid = train_test_split(
-    X_train_valid,
-    y_train_valid,
-    amount_train_valid,
-    test_size=0.25,
-    random_state=RANDOM_STATE,
-    stratify=y_train_valid,
-)
+    X_train_valid, y_train_valid, amount_train_valid,
+    test_size=0.25, random_state=RANDOM_STATE, stratify=y_train_valid)
 
-print("Train:", X_train.shape, "default rate:", y_train.mean())
-print("Valid:", X_valid.shape, "default rate:", y_valid.mean())
-print("Test:", X_test.shape, "default rate:", y_test.mean())
+print("Train:", X_train.shape, "Valid:", X_valid.shape, "Test:", X_test.shape)
+print("Train default:", y_train.mean(), "Valid default:", y_valid.mean())
 
 
 #%% 11. Preprocessing objects
 
-# Use preprocess_scaled for KNN, logistic, NN, LDA/QDA.
-# Use preprocess_tree for tree, bagging, RF, boosting.
+# OneHotEncoder sklearn compatibility
+try:
+    _ohe = OneHotEncoder(handle_unknown="ignore", sparse_output=True)
+    _OHE_MODE = "sparse_output"
+except TypeError:
+    _OHE_MODE = "sparse"
+
+if _OHE_MODE == "sparse_output":
+    ohe_kw = dict(handle_unknown="ignore", sparse_output=True)
+    ohe_kw_dense = dict(handle_unknown="ignore", sparse_output=False)
+else:
+    ohe_kw = dict(handle_unknown="ignore", sparse=True)
+    ohe_kw_dense = dict(handle_unknown="ignore", sparse=False)
 
 numeric_transformer_scaled = Pipeline(steps=[
     ("imputer", SimpleImputer(strategy="median")),
@@ -457,150 +335,99 @@ numeric_transformer_tree = Pipeline(steps=[
 ])
 
 categorical_transformer = Pipeline(steps=[
-    ("imputer", SimpleImputer(strategy="constant", fill_value="Unknown")),
-    ("onehot", OneHotEncoder(drop="first", handle_unknown="ignore")),
+    ("imputer", SimpleImputer(strategy="most_frequent")),
+    ("onehot", OneHotEncoder(**ohe_kw)),
 ])
 
-preprocess_scaled = ColumnTransformer(
-    transformers=[
-        ("num", numeric_transformer_scaled, numeric_cols),
-        ("cat", categorical_transformer, categorical_cols),
-    ]
-)
+categorical_transformer_dense = Pipeline(steps=[
+    ("imputer", SimpleImputer(strategy="most_frequent")),
+    ("onehot", OneHotEncoder(**ohe_kw_dense)),
+])
 
-preprocess_tree = ColumnTransformer(
-    transformers=[
-        ("num", numeric_transformer_tree, numeric_cols),
-        ("cat", categorical_transformer, categorical_cols),
-    ]
-)
+preprocess_scaled = ColumnTransformer([
+    ("num", numeric_transformer_scaled, numeric_cols),
+    ("cat", categorical_transformer, categorical_cols),
+])
+
+preprocess_scaled_dense = ColumnTransformer([
+    ("num", numeric_transformer_scaled, numeric_cols),
+    ("cat", categorical_transformer_dense, categorical_cols),
+])
+
+preprocess_tree = ColumnTransformer([
+    ("num", numeric_transformer_tree, numeric_cols),
+    ("cat", categorical_transformer, categorical_cols),
+])
+
+preprocess_hgb = Pipeline(steps=[
+    ("preprocess", preprocess_tree),
+    ("to_dense", FunctionTransformer(lambda X: X.toarray() if hasattr(X, "toarray") else X, accept_sparse=True)),
+])
+
+print("Preprocessors: scaled, scaled_dense, tree, hgb")
 
 
 #%% 12. Shared scoreboard functions
 
-# These functions are provided so everyone uses the same scoring rule.
-# You should still understand them from the teaching file.
-
-
 def loan_profit_vector(y_true, decision_approve, amount_series):
-    """Return profit/loss for each loan."""
     amount_arr = np.asarray(amount_series, dtype=float)
     y_arr = np.asarray(y_true)
     approve_arr = np.asarray(decision_approve).astype(bool)
-
-    gain_if_paid = 0.05 * amount_arr
-    loss_if_default = -0.25 * amount_arr
-
-    return np.where(
-        approve_arr,
-        np.where(y_arr == 0, gain_if_paid, loss_if_default),
-        0.0,
-    )
-
+    return np.where(approve_arr, np.where(y_arr == 0, 0.05 * amount_arr, -0.25 * amount_arr), 0.0)
 
 def evaluate_prob_model(model_name, y_true, prob_default, amount_series, threshold):
-    """Evaluate one model at one default-probability threshold."""
     y_true_arr = np.asarray(y_true)
     prob_default_arr = np.asarray(prob_default)
-
     pred_default = (prob_default_arr > threshold).astype(int)
     decision_approve = prob_default_arr <= threshold
-
-    confmat = confusion_matrix(y_true_arr, pred_default, labels=[1, 0])
-
-    TP = confmat[0, 0]
-    FN = confmat[0, 1]
-    FP = confmat[1, 0]
-    TN = confmat[1, 1]
-
+    TP = ((y_true_arr == 1) & (pred_default == 1)).sum()
+    FN = ((y_true_arr == 1) & (pred_default == 0)).sum()
+    FP = ((y_true_arr == 0) & (pred_default == 1)).sum()
+    TN = ((y_true_arr == 0) & (pred_default == 0)).sum()
     profit = loan_profit_vector(y_true_arr, decision_approve, amount_series)
-
     return {
-        "model": model_name,
-        "threshold_default": threshold,
-        "threshold_success": 1 - threshold,
+        "model": model_name, "threshold_default": threshold, "threshold_success": 1 - threshold,
         "accuracy": accuracy_score(y_true_arr, pred_default),
-        "recall_default": recall_score(y_true_arr, pred_default, zero_division=0),
-        "precision_default": precision_score(y_true_arr, pred_default, zero_division=0),
+        "recall_default_sensitivity": recall_score(y_true_arr, pred_default, zero_division=0),
         "specificity_paid": TN / (TN + FP) if (TN + FP) > 0 else np.nan,
+        "precision_default": precision_score(y_true_arr, pred_default, zero_division=0),
         "f1_default": f1_score(y_true_arr, pred_default, zero_division=0),
         "auc": roc_auc_score(y_true_arr, prob_default_arr),
         "brier": brier_score_loss(y_true_arr, prob_default_arr),
-        "net_profit": profit.sum(),
-        "approval_rate": decision_approve.mean(),
+        "net_profit": profit.sum(), "approval_rate": decision_approve.mean(),
         "approved_default_rate": y_true_arr[decision_approve].mean() if decision_approve.sum() > 0 else np.nan,
         "denied_default_rate": y_true_arr[~decision_approve].mean() if (~decision_approve).sum() > 0 else np.nan,
-        "TP_default_denied": TP,
-        "FN_default_approved": FN,
-        "FP_paid_denied": FP,
-        "TN_paid_approved": TN,
+        "TP_default_denied": int(TP), "FN_default_approved": int(FN),
+        "FP_paid_denied": int(FP), "TN_paid_approved": int(TN),
     }
 
-
 def tune_threshold_by_profit(model_name, y_true, prob_default, amount_series, thresholds=None):
-    """Search validation thresholds and sort by net profit."""
     if thresholds is None:
         thresholds = np.linspace(0.01, 0.60, 120)
-
     thresholds = np.unique(np.append(thresholds, THEORETICAL_DEFAULT_THRESHOLD))
-
-    rows = []
-    for th in thresholds:
-        rows.append(evaluate_prob_model(model_name, y_true, prob_default, amount_series, th))
-
+    rows = [evaluate_prob_model(model_name, y_true, prob_default, amount_series, th) for th in thresholds]
     return pd.DataFrame(rows).sort_values("net_profit", ascending=False).reset_index(drop=True)
 
-
 def fit_predict_evaluate(model_name, estimator, preprocess_obj):
-    """Fit one model and return validation results."""
     start = time.perf_counter()
-
-    pipe = Pipeline(steps=[
-        ("preprocess", preprocess_obj),
-        ("model", estimator),
-    ])
-
+    pipe = Pipeline(steps=[("preprocess", preprocess_obj), ("model", estimator)])
     pipe.fit(X_train, y_train)
     prob_default_valid = pipe.predict_proba(X_valid)[:, 1]
-
     runtime = time.perf_counter() - start
-
-    theory = evaluate_prob_model(
-        model_name,
-        y_valid,
-        prob_default_valid,
-        amount_valid,
-        THEORETICAL_DEFAULT_THRESHOLD,
-    )
-    theory["threshold_type"] = "theoretical_1_over_6"
-    theory["runtime_seconds"] = runtime
-
-    threshold_table = tune_threshold_by_profit(
-        model_name,
-        y_valid,
-        prob_default_valid,
-        amount_valid,
-    )
-
+    theory = evaluate_prob_model(model_name, y_valid, prob_default_valid, amount_valid, THEORETICAL_DEFAULT_THRESHOLD)
+    theory["threshold_type"] = "theoretical_1_over_6"; theory["runtime_seconds"] = runtime
+    threshold_table = tune_threshold_by_profit(model_name, y_valid, prob_default_valid, amount_valid)
     tuned = threshold_table.iloc[0].to_dict()
-    tuned["threshold_type"] = "validation_profit_tuned"
-    tuned["runtime_seconds"] = runtime
-
+    tuned["threshold_type"] = "validation_profit_tuned"; tuned["runtime_seconds"] = runtime
     return pipe, prob_default_valid, theory, tuned, threshold_table
 
 
 #%% 13. Baseline policies
 
-approve_all_profit = loan_profit_vector(
-    y_true=y_valid,
-    decision_approve=np.ones(len(y_valid), dtype=bool),
-    amount_series=amount_valid,
-).sum()
-
+approve_all_profit = loan_profit_vector(y_true=y_valid, decision_approve=np.ones(len(y_valid), dtype=bool), amount_series=amount_valid).sum()
 deny_all_profit = 0.0
-
-print("Approve-all validation profit:", approve_all_profit)
-print("Deny-all validation profit:", deny_all_profit)
+print("Approve-all profit:", approve_all_profit)
+print("Deny-all profit:", deny_all_profit)
 
 
 #%% 14A. KNN workspace — Owner: Hai An
@@ -608,82 +435,198 @@ print("Deny-all validation profit:", deny_all_profit)
 RUN_KNN = False
 
 if RUN_KNN:
-    # Questions:
-    # 1. Which k values did you try first?
-    # 2. Did weights="uniform" or weights="distance" work better?
-    # 3. Which preprocessing object should KNN use?
-    # 4. Does KNN beat approve-all profit?
+    knn_best = KNeighborsClassifier(n_neighbors=51, weights="distance", p=2, n_jobs=-1)
+    knn_pipe, knn_prob, knn_theory, knn_tuned, knn_threshold_table = fit_predict_evaluate(
+        "KNN_k51_distance", knn_best, preprocess_obj=preprocess_scaled)
 
-    # Write your first KNN model here.
-    # Keep the first run simple. Don't try to tune everything at once.
-    #
-    # Example start:
-    # knn = KNeighborsClassifier(n_neighbors=___, weights="___", p=___)
-    # knn_pipe, knn_prob, knn_theory, knn_tuned, knn_threshold_table = fit_predict_evaluate(
-    #     "KNN", knn, preprocess_obj=preprocess_scaled
-    # )
-    # print(pd.DataFrame([knn_theory, knn_tuned]))
-    # print(knn_threshold_table.head(10))
-    pass
+    print("\nKNN validation results:")
+    print(pd.DataFrame([knn_theory, knn_tuned])[
+        ["model","threshold_default","threshold_type","auc","brier","net_profit","approval_rate","runtime_seconds"]])
+
+    print("\nTop 10 KNN thresholds:")
+    print(knn_threshold_table.head(10)[["threshold_default","net_profit","approval_rate","approved_default_rate","auc"]])
 
 # Hai An KNN notes:
-# First run result:
-# Best validation threshold:
-# Validation net profit:
-# Approved default rate:
-# Interpretation:
+# Pilot: k=51, distance. Profit ~$53.8M, AUC 0.860, approval ~66.5%.
+# Simple baseline — beats approve-all comfortably but far below tree-family.
 
 
-#%% 14B. Decision tree / bagging / random forest / boosting workspace — Owner: Hai An
+#%% 14B. Decision tree / bagging / RF / AdaBoost / HGB — Owner: Hai An
 
 RUN_TREE_MODELS = False
 
 if RUN_TREE_MODELS:
-    # Questions:
-    # 1. For one tree, what max_depth and min_samples_leaf did you try?
-    # 2. Does bagging improve over one tree?
-    # 3. For Random Forest, does max_features="sqrt", 0.5, or None work better?
-    # 4. Does boosting improve over bagging or Random Forest?
+    tree_results = []
 
-    # Write your tree-family models here.
-    # Use preprocess_tree.
-    # Keep each model result separately so we can compare them later.
-    #
-    # Example result names you can use:
-    # tree_tuned, bag_tuned, rf_tuned, boost_tuned
-    pass
+    # --------- Random Forest ---------
+    print("\n" + "=" * 60)
+    print("Random Forest")
+    print("=" * 60)
+
+    rf_configs = [
+        {"n_estimators": 100, "max_depth": 16, "min_samples_leaf": 25, "max_features": None, "label": "RF_n100_d16_l25"},
+        {"n_estimators": 100, "max_depth": 16, "min_samples_leaf": 50, "max_features": None, "label": "RF_n100_d16_l50"},
+        {"n_estimators": 200, "max_depth": 16, "min_samples_leaf": 50, "max_features": None, "label": "RF_n200_d16_l50"},
+    ]
+    for cfg in rf_configs:
+        rf = RandomForestClassifier(n_estimators=cfg["n_estimators"], max_depth=cfg["max_depth"],
+                                    min_samples_leaf=cfg["min_samples_leaf"], max_features=cfg["max_features"],
+                                    n_jobs=-1, random_state=RANDOM_STATE)
+        _, _, _, tuned, _ = fit_predict_evaluate(cfg["label"], rf, preprocess_obj=preprocess_tree)
+        tree_results.append(tuned)
+        print(f"  {cfg['label']}: Profit=${tuned['net_profit']:,.0f}, AUC={tuned['auc']:.4f}, Thr={tuned['threshold_default']:.3f}")
+
+    # --------- Bagging ---------
+    print("\n" + "=" * 60)
+    print("Bagging")
+    print("=" * 60)
+    base_bag = DecisionTreeClassifier(max_depth=16, min_samples_leaf=50, random_state=RANDOM_STATE)
+    try:
+        bag = BaggingClassifier(estimator=base_bag, n_estimators=100, max_samples=0.7,
+                                bootstrap=True, n_jobs=-1, random_state=RANDOM_STATE)
+    except TypeError:
+        bag = BaggingClassifier(base_estimator=base_bag, n_estimators=100, max_samples=0.7,
+                                bootstrap=True, n_jobs=-1, random_state=RANDOM_STATE)
+    _, _, _, bag_tuned, _ = fit_predict_evaluate("Bagging_n100_d16_l50", bag, preprocess_obj=preprocess_tree)
+    tree_results.append(bag_tuned)
+    print(f"  Profit=${bag_tuned['net_profit']:,.0f}, AUC={bag_tuned['auc']:.4f}")
+
+    # --------- AdaBoost ---------
+    print("\n" + "=" * 60)
+    print("AdaBoost")
+    print("=" * 60)
+    base_ada = DecisionTreeClassifier(max_depth=2, min_samples_leaf=200, random_state=RANDOM_STATE)
+    try:
+        boost = AdaBoostClassifier(estimator=base_ada, n_estimators=100, learning_rate=0.05, random_state=RANDOM_STATE)
+    except TypeError:
+        boost = AdaBoostClassifier(base_estimator=base_ada, n_estimators=100, learning_rate=0.05, random_state=RANDOM_STATE)
+    _, _, _, boost_tuned, _ = fit_predict_evaluate("AdaBoost_d2_l200_n100", boost, preprocess_obj=preprocess_tree)
+    tree_results.append(boost_tuned)
+    print(f"  Profit=${boost_tuned['net_profit']:,.0f}, AUC={boost_tuned['auc']:.4f}")
+
+    # --------- HGB — focused tuning around official best ---------
+    if _HAS_HIST_GB:
+        print("\n" + "=" * 60)
+        print("HistGradientBoosting")
+        print("=" * 60)
+
+        hgb_configs = [
+            {"max_iter": 100, "learning_rate": 0.05, "max_leaf_nodes": 31, "min_samples_leaf": 50,
+             "l2_regularization": 0.1, "label": "HGB_i100_lr0.05_ln31"},
+            {"max_iter": 200, "learning_rate": 0.05, "max_leaf_nodes": 31, "min_samples_leaf": 50,
+             "l2_regularization": 0.1, "label": "HGB_i200_lr0.05_ln31"},
+            {"max_iter": 200, "learning_rate": 0.03, "max_leaf_nodes": 31, "min_samples_leaf": 50,
+             "l2_regularization": 0.1, "label": "HGB_i200_lr0.03_ln31"},
+            {"max_iter": 200, "learning_rate": 0.05, "max_leaf_nodes": 15, "min_samples_leaf": 100,
+             "l2_regularization": 0.1, "label": "HGB_i200_lr0.05_ln15"},
+            {"max_iter": 250, "learning_rate": 0.08, "max_leaf_nodes": 63, "min_samples_leaf": 50,
+             "l2_regularization": 0.1, "label": "HGB_i250_lr0.08_ln63"},
+        ]
+
+        for cfg in hgb_configs:
+            hgb = HistGradientBoostingClassifier(
+                max_iter=cfg["max_iter"], learning_rate=cfg["learning_rate"],
+                max_leaf_nodes=cfg["max_leaf_nodes"], min_samples_leaf=cfg["min_samples_leaf"],
+                l2_regularization=cfg["l2_regularization"], random_state=RANDOM_STATE)
+            _, _, _, tuned, _ = fit_predict_evaluate(cfg["label"], hgb, preprocess_obj=preprocess_hgb)
+            tree_results.append(tuned)
+            print(f"  {cfg['label']}: Profit=${tuned['net_profit']:,.0f}, AUC={tuned['auc']:.4f}, Thr={tuned['threshold_default']:.3f}")
+
+    # --------- Summary ---------
+    print("\n" + "=" * 60)
+    print("Tree-family results")
+    print("=" * 60)
+    tree_df = pd.DataFrame(tree_results).sort_values("net_profit", ascending=False).reset_index(drop=True)
+    cols = ["model", "threshold_default", "auc", "brier", "net_profit", "approval_rate", "approved_default_rate", "runtime_seconds"]
+    print(tree_df[[c for c in cols if c in tree_df.columns]].to_string(index=False))
 
 # Hai An tree-family notes:
-# Best tree result:
-# Best bagging result:
-# Best RF result:
-# Best boosting result:
-# Interpretation:
+# Best HGB: 250 iter, lr=0.08, leaf=63 → profit $71.3M, AUC 0.971
+# Best RF: n=100, depth=16, leaf=25 → profit $68.9M, AUC 0.966
+# max_features=None consistently beats sqrt/0.5 — every feature contributes.
+# HGB is the current overall leader.
 
 
-#%% 14C. Logistic regression and discriminant analysis workspace — Owner: Hai Anh
+#%% 14C. Logistic regression and discriminant analysis — Owner: Hai Anh
 
 RUN_LOGIT_DA = False
 
 if RUN_LOGIT_DA:
-    # Questions:
-    # 1. Try Ridge, Lasso, and ElasticNet.
-    # 2. Which C values did you try?
-    # 3. Did the solver converge? Check n_iter_.
-    # 4. For LDA/QDA, did regularization help?
+    logit_results = []
 
-    # Write your logistic / discriminant models here.
-    # Use preprocess_scaled.
-    #
-    # Example result names you can use:
-    # ridge_tuned, lasso_tuned, elastic_tuned, lda_tuned, qda_best
-    pass
+    # --------- Ridge (L2) ---------
+    print("\n" + "=" * 50)
+    print("Logistic Ridge (L2)")
+    print("=" * 50)
+    for C in [0.1, 1.0, 10.0]:
+        ridge = LogisticRegression(penalty="l2", C=C, solver="lbfgs", max_iter=2000, random_state=RANDOM_STATE)
+        _, _, _, tuned, _ = fit_predict_evaluate(f"Ridge_C{C}", ridge, preprocess_scaled)
+        logit_results.append(tuned)
+        print(f"  C={C}: Profit=${tuned['net_profit']:,.0f}, AUC={tuned['auc']:.4f}, Thr={tuned['threshold_default']:.3f}")
+
+    # --------- Lasso (L1) ---------
+    print("\n" + "=" * 50)
+    print("Logistic Lasso (L1)")
+    print("=" * 50)
+    for C in [0.1, 0.5]:
+        lasso = LogisticRegression(penalty="l1", C=C, solver="saga", max_iter=2000, random_state=RANDOM_STATE)
+        _, _, _, tuned, _ = fit_predict_evaluate(f"Lasso_C{C}", lasso, preprocess_scaled)
+        logit_results.append(tuned)
+        print(f"  C={C}: Profit=${tuned['net_profit']:,.0f}, AUC={tuned['auc']:.4f}, Thr={tuned['threshold_default']:.3f}")
+
+    # --------- ElasticNet ---------
+    print("\n" + "=" * 50)
+    print("Logistic ElasticNet")
+    print("=" * 50)
+    elastic = LogisticRegression(penalty="elasticnet", C=1.0, l1_ratio=0.3, solver="saga", max_iter=2000, random_state=RANDOM_STATE)
+    _, _, _, tuned, _ = fit_predict_evaluate("ElasticNet", elastic, preprocess_scaled)
+    logit_results.append(tuned)
+    print(f"  Profit=${tuned['net_profit']:,.0f}, AUC={tuned['auc']:.4f}, Thr={tuned['threshold_default']:.3f}")
+
+    # --------- LDA ---------
+    print("\n" + "=" * 50)
+    print("LDA (lsqr, shrinkage=auto)")
+    print("=" * 50)
+    start = time.perf_counter()
+    X_train_d = preprocess_scaled_dense.fit_transform(X_train, y_train)
+    X_valid_d = preprocess_scaled_dense.transform(X_valid)
+    if hasattr(X_train_d, "toarray"):
+        X_train_d = X_train_d.toarray(); X_valid_d = X_valid_d.toarray()
+    lda = LinearDiscriminantAnalysis(solver="lsqr", shrinkage="auto")
+    lda.fit(X_train_d, y_train)
+    lda_prob = lda.predict_proba(X_valid_d)[:, 1]
+    runtime = time.perf_counter() - start
+    lda_tuned = tune_threshold_by_profit("LDA_lsqr_auto", y_valid, lda_prob, amount_valid).iloc[0].to_dict()
+    lda_tuned["threshold_type"] = "validation_profit_tuned"; lda_tuned["runtime_seconds"] = runtime
+    logit_results.append(lda_tuned)
+    print(f"  Profit=${lda_tuned['net_profit']:,.0f}, AUC={lda_tuned.get('auc',0):.4f}, Thr={lda_tuned['threshold_default']:.3f}")
+
+    # --------- QDA ---------
+    print("\n" + "=" * 50)
+    print("QDA (reg_param=0.2)")
+    print("=" * 50)
+    start = time.perf_counter()
+    qda = QuadraticDiscriminantAnalysis(reg_param=0.2)
+    qda.fit(X_train_d, y_train)
+    qda_prob = qda.predict_proba(X_valid_d)[:, 1]
+    runtime = time.perf_counter() - start
+    qda_tuned = tune_threshold_by_profit("QDA_reg0.2", y_valid, qda_prob, amount_valid).iloc[0].to_dict()
+    qda_tuned["threshold_type"] = "validation_profit_tuned"; qda_tuned["runtime_seconds"] = runtime
+    logit_results.append(qda_tuned)
+    print(f"  Profit=${qda_tuned['net_profit']:,.0f}, AUC={qda_tuned.get('auc',0):.4f}, Thr={qda_tuned['threshold_default']:.3f}")
+
+    # --------- Summary ---------
+    print("\n" + "=" * 50)
+    print("Logistic/LDA/QDA Summary")
+    print("=" * 50)
+    logit_df = pd.DataFrame(logit_results).sort_values("net_profit", ascending=False).reset_index(drop=True)
+    cols = ["model", "threshold_default", "auc", "brier", "net_profit", "approval_rate", "approved_default_rate", "runtime_seconds"]
+    print(logit_df[[c for c in cols if c in logit_df.columns]].to_string(index=False))
 
 # Hai Anh notes:
-# Best logistic result:
-# Best LDA/QDA result:
-# Solver/convergence concern:
-# Interpretation:
+# Best logistic: Lasso C=0.1 → $50.7M, Ridge C=1.0 → $50.4M. LDA ~$49.7M, QDA ~$44.3M.
+# Ridge is the safest pick (fast, lbfgs convergence). L1 does NOT improve over L2.
+# LDA is a fast statistical baseline. QDA needs heavy regularization.
 
 
 #%% 14D. Neural network workspace — Owner: Huyen Anh
@@ -691,304 +634,246 @@ if RUN_LOGIT_DA:
 RUN_NEURAL_NET = False
 
 if RUN_NEURAL_NET:
-    # Questions:
-    # 1. What hidden_layer_sizes did you try?
-    # 2. Which activation did you use?
-    # 3. Does the loss curve fall smoothly?
-    # 4. Does higher flexibility improve validation net profit?
+    mlp_best = MLPClassifier(
+        hidden_layer_sizes=(128, 64, 32),
+        activation="relu",
+        solver="adam",
+        alpha=0.01,
+        early_stopping=True,
+        validation_fraction=0.10,
+        n_iter_no_change=10,
+        max_iter=300,
+        random_state=RANDOM_STATE,
+    )
 
-    # Write your neural network models here.
-    # Use preprocess_scaled.
-    #
-    # Example result names you can use:
-    # mlp_tuned, mlp_threshold_table
-    pass
+    mlp_pipe, mlp_prob, mlp_theory, mlp_tuned, mlp_threshold_table = fit_predict_evaluate(
+        "NeuralNetwork_128x64x32", mlp_best, preprocess_obj=preprocess_scaled
+    )
 
-# Huyen Anh notes:
-# Best NN architecture:
-# Best validation threshold:
-# Validation net profit:
-# Loss curve observation:
-# Interpretation:
+    print("\n--- Theoretical threshold (1/6) ---")
+    print(pd.DataFrame([mlp_theory])[["model","threshold_default","auc","brier","net_profit","approval_rate"]])
+
+    print("\n--- Profit-tuned threshold ---")
+    print(pd.DataFrame([mlp_tuned])[["model","threshold_default","auc","brier","net_profit","approval_rate"]])
+
+    print("\n--- Top 10 thresholds ---")
+    print(mlp_threshold_table.head(10)[["threshold_default","net_profit","approval_rate","approved_default_rate","auc"]])
+
+    # Loss curve
+    plt.figure(figsize=(8, 4))
+    plt.plot(mlp_pipe.named_steps["model"].loss_curve_, label="Training loss")
+    plt.xlabel("Epoch"); plt.ylabel("Loss")
+    plt.title("Neural Network Training Loss Curve")
+    plt.legend(); plt.tight_layout(); plt.show()
+
+    # ROC curve
+    fpr, tpr, _ = roc_curve(y_valid, mlp_prob)
+    plt.figure(figsize=(6, 5))
+    plt.plot(fpr, tpr, label=f"NN AUC = {roc_auc_score(y_valid, mlp_prob):.3f}")
+    plt.plot([0, 1], [0, 1], "k--", label="Random")
+    plt.xlabel("False Positive Rate"); plt.ylabel("True Positive Rate")
+    plt.title("ROC Curve — Neural Network")
+    plt.legend(); plt.tight_layout(); plt.show()
+
+# Huyen Anh NN notes:
+# (128,64,32), alpha=0.01 → profit $60.9M, AUC 0.919, approval ~71.6%.
+# Tuned threshold: 0.076 — very conservative. Approved default rate: 3.84%.
+# CV best: (128,64,32), alpha=0.01, AUC=0.913 ± 0.003.
+# Larger networks did not justify extra complexity. NN currently below HGB/RF.
 
 
 #%% 15. Cross-validation helper and result log
 
-# Everyone should run CV / tuning for their own assigned model family.
-# CV happens on X_train / y_train only.
-# Do not use X_valid inside cross-validation.
-
 cv_results = []
 
 def add_cv_result(owner, model_family, params, scores):
-    """Append one CV result row to the shared CV log."""
     cv_results.append({
-        "owner": owner,
-        "model_family": model_family,
-        "params": params,
-        "cv_auc_mean": float(np.mean(scores)),
+        "owner": owner, "model_family": model_family,
+        "params": params, "cv_auc_mean": float(np.mean(scores)),
         "cv_auc_std": float(np.std(scores)),
     })
 
 
 #%% 15A. KNN cross-validation — Owner: Hai An
 
-RUN_KNN_CV = False # Set to True to run
+RUN_KNN_CV = False
 
 if RUN_KNN_CV:
-    # Goal:
-    # Try several KNN settings using CV on training data only.
-    # After CV, choose a small number of promising settings and evaluate them on validation.
-
     cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=RANDOM_STATE)
-
-    # Write your CV loop here.
-    # Suggested grid:
-    # k_values = [11, 31, 51, 101]
-    # weights_options = ["uniform", "distance"]
-    #
-    # for k in k_values:
-    #     for w in weights_options:
-    #         candidate = Pipeline(steps=[
-    #             ("preprocess", preprocess_scaled),
-    #             ("model", KNeighborsClassifier(n_neighbors=k, weights=w, p=2, n_jobs=-1)),
-    #         ])
-    #         scores = cross_val_score(candidate, X_train, y_train, cv=cv, scoring="roc_auc", n_jobs=-1)
-    #         add_cv_result("Hai An", "KNN", {"k": k, "weights": w}, scores)
-    #         print(k, w, scores.mean())
-    pass
-
-# Hai An KNN CV notes:
-# Best CV setting:
-# Did CV agree with validation profit?
+    k_values = [11, 31, 51, 101]
+    weights_options = ["uniform", "distance"]
+    for k in k_values:
+        for w in weights_options:
+            candidate = Pipeline(steps=[
+                ("preprocess", preprocess_scaled),
+                ("model", KNeighborsClassifier(n_neighbors=k, weights=w, p=2, n_jobs=-1)),
+            ])
+            scores = cross_val_score(candidate, X_train, y_train, cv=cv, scoring="roc_auc", n_jobs=-1)
+            add_cv_result("Hai An", "KNN", {"k": k, "weights": w}, scores)
+            print(k, w, scores.mean())
 
 
-#%% 15B. Tree-family cross-validation — Owner: Hai An
+#%% 15B. Tree-family / HGB cross-validation — Owner: Hai An
 
-RUN_TREE_CV = False # Set to True to run
+RUN_TREE_CV = False
 
 if RUN_TREE_CV:
-    # Goal:
-    # Run a small CV grid for the strongest tree-family model.
-    # Do not make the grid too large at first.
-
     cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=RANDOM_STATE)
 
-    # Write your CV loop here.
-    # Suggested Random Forest grid:
-    # for depth in [12, 16]:
-    #     for leaf in [50, 100]:
-    #         for max_feat in [None, 0.5, "sqrt"]:
-    #             candidate = Pipeline(steps=[
-    #                 ("preprocess", preprocess_tree),
-    #                 ("model", RandomForestClassifier(
-    #                     n_estimators=50,
-    #                     max_depth=depth,
-    #                     min_samples_leaf=leaf,
-    #                     max_features=max_feat,
-    #                     n_jobs=1,
-    #                     random_state=RANDOM_STATE,
-    #                 )),
-    #             ])
-    #             scores = cross_val_score(candidate, X_train, y_train, cv=cv, scoring="roc_auc", n_jobs=-1)
-    #             add_cv_result("Hai An", "Random Forest", {
-    #                 "max_depth": depth,
-    #                 "min_samples_leaf": leaf,
-    #                 "max_features": max_feat,
-    #             }, scores)
-    #             print(depth, leaf, max_feat, scores.mean())
-    pass
+    rf_focused = [
+        {"n_estimators": 100, "max_depth": 16, "min_samples_leaf": 25, "max_features": None},
+        {"n_estimators": 100, "max_depth": 16, "min_samples_leaf": 50, "max_features": None},
+        {"n_estimators": 200, "max_depth": 16, "min_samples_leaf": 50, "max_features": None},
+    ]
+    for p in rf_focused:
+        candidate = Pipeline(steps=[
+            ("preprocess", preprocess_tree),
+            ("model", RandomForestClassifier(**p, n_jobs=-1, random_state=RANDOM_STATE)),
+        ])
+        scores = cross_val_score(candidate, X_train, y_train, cv=cv, scoring="roc_auc", n_jobs=-1)
+        add_cv_result("Hai An", "RandomForest", p, scores)
+        print("RF", p, scores.mean())
 
-# Hai An tree CV notes:
-# Best CV setting:
-# Did max_features matter?
+    if _HAS_HIST_GB:
+        hgb_focused = [
+            {"max_iter": 200, "learning_rate": 0.05, "max_leaf_nodes": 31, "min_samples_leaf": 50, "l2_regularization": 0.1},
+            {"max_iter": 250, "learning_rate": 0.08, "max_leaf_nodes": 63, "min_samples_leaf": 50, "l2_regularization": 0.1},
+        ]
+        for p in hgb_focused:
+            candidate = Pipeline(steps=[
+                ("preprocess", preprocess_hgb),
+                ("model", HistGradientBoostingClassifier(**p, random_state=RANDOM_STATE)),
+            ])
+            scores = cross_val_score(candidate, X_train, y_train, cv=cv, scoring="roc_auc", n_jobs=1)
+            add_cv_result("Hai An", "HGB", p, scores)
+            print("HGB", p, scores.mean())
 
 
 #%% 15C. Logistic / discriminant cross-validation — Owner: Hai Anh
 
-RUN_LOGIT_DA_CV = False # Set to True to run
+RUN_LOGIT_DA_CV = False
 
 if RUN_LOGIT_DA_CV:
-    # Goal:
-    # Run CV for logistic settings.
-    # LDA/QDA can be checked separately if memory becomes heavy.
-
     cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=RANDOM_STATE)
 
-    # Write your CV loop here.
-    # Suggested Ridge/Lasso grid:
-    # for penalty, C, l1_ratio in [
-    #     ("l2", 0.1, None),
-    #     ("l2", 1.0, None),
-    #     ("l1", 0.1, None),
-    #     ("l1", 0.5, None),
-    #     ("elasticnet", 0.5, 0.5),
-    # ]:
-    #     kwargs = {
-    #         "penalty": penalty,
-    #         "C": C,
-    #         "solver": "saga",
-    #         "max_iter": 3000,
-    #         "n_jobs": -1,
-    #         "random_state": RANDOM_STATE,
-    #     }
-    #     if penalty == "elasticnet":
-    #         kwargs["l1_ratio"] = l1_ratio
-    #     candidate = Pipeline(steps=[
-    #         ("preprocess", preprocess_scaled),
-    #         ("model", LogisticRegression(**kwargs)),
-    #     ])
-    #     scores = cross_val_score(candidate, X_train, y_train, cv=cv, scoring="roc_auc", n_jobs=-1)
-    #     add_cv_result("Hai Anh", "Logistic", {"penalty": penalty, "C": C, "l1_ratio": l1_ratio}, scores)
-    #     print(penalty, C, l1_ratio, scores.mean())
-    pass
+    param_grid = [
+        {"penalty": "l2", "C": 0.1, "solver": "lbfgs", "name": "Ridge_C0.1"},
+        {"penalty": "l2", "C": 1.0, "solver": "lbfgs", "name": "Ridge_C1.0"},
+        {"penalty": "l2", "C": 10.0, "solver": "lbfgs", "name": "Ridge_C10"},
+        {"penalty": "l1", "C": 0.1, "solver": "saga", "name": "Lasso_C0.1"},
+        {"penalty": "l1", "C": 0.5, "solver": "saga", "name": "Lasso_C0.5"},
+        {"penalty": "elasticnet", "C": 1.0, "l1_ratio": 0.3, "solver": "saga", "name": "ElasticNet"},
+    ]
+    for p in param_grid:
+        kwargs = {"penalty": p["penalty"], "C": p["C"], "solver": p["solver"],
+                  "max_iter": 2000, "random_state": RANDOM_STATE}
+        if p["penalty"] == "elasticnet":
+            kwargs["l1_ratio"] = p["l1_ratio"]
+        candidate = Pipeline([("preprocess", preprocess_scaled), ("model", LogisticRegression(**kwargs))])
+        scores = cross_val_score(candidate, X_train, y_train, cv=cv, scoring="roc_auc", n_jobs=-1)
+        add_cv_result("Hai Anh", "Logistic", p, scores)
+        print(f"  {p['name']}: CV AUC={scores.mean():.4f} ± {scores.std():.4f}")
 
-# Hai Anh CV notes:
-# Best logistic CV setting:
-# Did Lasso/ElasticNet improve over Ridge?
+    lda_pipe = Pipeline([("preprocess", preprocess_scaled_dense), ("model", LinearDiscriminantAnalysis(solver="lsqr", shrinkage="auto"))])
+    scores = cross_val_score(lda_pipe, X_train, y_train, cv=cv, scoring="roc_auc", n_jobs=-1)
+    add_cv_result("Hai Anh", "LDA", {"solver": "lsqr", "shrinkage": "auto"}, scores)
+    print(f"  LDA: CV AUC={scores.mean():.4f} ± {scores.std():.4f}")
+
+    qda_pipe = Pipeline([("preprocess", preprocess_scaled_dense), ("model", QuadraticDiscriminantAnalysis(reg_param=0.2))])
+    scores = cross_val_score(qda_pipe, X_train, y_train, cv=cv, scoring="roc_auc", n_jobs=-1)
+    add_cv_result("Hai Anh", "QDA", {"reg_param": 0.2}, scores)
+    print(f"  QDA: CV AUC={scores.mean():.4f} ± {scores.std():.4f}")
 
 
 #%% 15D. Neural network cross-validation / tuning — Owner: Huyen Anh
 
-RUN_NN_CV = False # Set to True to run
+RUN_NN_CV = False
 
 if RUN_NN_CV:
-    # Goal:
-    # Try a small neural network grid.
-    # Keep it small first because NN can become slow.
-
     cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=RANDOM_STATE)
 
-    # Write your CV loop here.
-    # Suggested grid:
-    # architectures = [(32,), (64, 32), (128, 64)]
-    # alphas = [0.0001, 0.001]
-    #
-    # for arch in architectures:
-    #     for alpha in alphas:
-    #         candidate = Pipeline(steps=[
-    #             ("preprocess", preprocess_scaled),
-    #             ("model", MLPClassifier(
-    #                 hidden_layer_sizes=arch,
-    #                 activation="relu",
-    #                 solver="adam",
-    #                 alpha=alpha,
-    #                 early_stopping=True,
-    #                 validation_fraction=0.10,
-    #                 max_iter=100,
-    #                 random_state=RANDOM_STATE,
-    #             )),
-    #         ])
-    #         scores = cross_val_score(candidate, X_train, y_train, cv=cv, scoring="roc_auc", n_jobs=-1)
-    #         add_cv_result("Huyen Anh", "Neural Network", {"hidden_layer_sizes": arch, "alpha": alpha}, scores)
-    #         print(arch, alpha, scores.mean())
-    pass
+    architectures = [(64, 32), (128, 64), (128, 64, 32), (256, 128, 64)]
+    alphas = [0.001, 0.01, 0.05]
 
-# Huyen Anh CV notes:
-# Best NN CV setting:
-# Did larger networks help enough to justify runtime?
+    for arch in architectures:
+        for alpha in alphas:
+            candidate = Pipeline(steps=[
+                ("preprocess", preprocess_scaled),
+                ("model", MLPClassifier(
+                    hidden_layer_sizes=arch, activation="relu", solver="adam",
+                    alpha=alpha, early_stopping=True, validation_fraction=0.10,
+                    n_iter_no_change=10, max_iter=300, random_state=RANDOM_STATE,
+                )),
+            ])
+            scores = cross_val_score(candidate, X_train, y_train, cv=cv, scoring="roc_auc", n_jobs=1)
+            add_cv_result("Huyen Anh", "Neural Network", {"hidden_layer_sizes": arch, "alpha": alpha}, scores)
+            print("NN", arch, "alpha=", alpha, "CV AUC:", round(scores.mean(), 4), "±", round(scores.std(), 4))
+
+# Huyen Anh NN CV notes:
+# Best: (128,64,32), alpha=0.01 → CV AUC=0.913 ± 0.003
+# alpha=0.01 consistently wins. Larger networks show diminishing returns.
 
 
 #%% 15E. CV summary table
 
 if len(cv_results) > 0:
-    cv_results_df = pd.DataFrame(cv_results).sort_values(
-        ["owner", "cv_auc_mean"],
-        ascending=[True, False],
-    ).reset_index(drop=True)
-
+    cv_results_df = pd.DataFrame(cv_results).sort_values(["owner", "cv_auc_mean"], ascending=[True, False]).reset_index(drop=True)
     print(cv_results_df)
 else:
-    print("No CV results yet. Each owner can turn on their own RUN_*_CV flag.")
-
-# Answer / notes:
-# Which settings are worth taking to validation?
-#
-#
+    print("No CV results yet. Turn on individual RUN_*_CV flags.")
 
 
 #%% 16. Build validation leaderboard
 
-# Each owner should append their best result dictionary into model_results.
-# Usually use the validation-profit-tuned row, not the theoretical threshold row.
-
 model_results = []
 
-# Examples after running model blocks:
-# model_results.append(knn_tuned)
-# model_results.append(tree_tuned)
-# model_results.append(rf_tuned)
-# model_results.append(ridge_tuned)
-# model_results.append(mlp_tuned)
+varnames = [
+    "knn_tuned", "rf_tuned", "bag_tuned", "boost_tuned", "hgb_tuned",
+    "ridge_tuned", "lasso_tuned", "elastic_tuned", "lda_tuned", "qda_tuned", "mlp_tuned",
+]
+for v in varnames:
+    if v in globals():
+        model_results.append(globals()[v])
+
+# Also capture tree_results list from Block 14B
+if "tree_results" in globals():
+    model_results.extend(tree_results)
+if "logit_results" in globals():
+    model_results.extend(logit_results)
 
 baseline_rows = [
-    {
-        "model": "Approve All Baseline",
-        "threshold_type": "baseline",
-        "net_profit": approve_all_profit,
-        "approval_rate": 1.0,
-        "approved_default_rate": y_valid.mean(),
-    },
-    {
-        "model": "Deny All Baseline",
-        "threshold_type": "baseline",
-        "net_profit": deny_all_profit,
-        "approval_rate": 0.0,
-        "approved_default_rate": np.nan,
-    },
+    {"model": "Approve All Baseline", "threshold_type": "baseline",
+     "net_profit": approve_all_profit, "approval_rate": 1.0, "approved_default_rate": y_valid.mean()},
+    {"model": "Deny All Baseline", "threshold_type": "baseline",
+     "net_profit": deny_all_profit, "approval_rate": 0.0, "approved_default_rate": np.nan},
 ]
 
-leaderboard = pd.DataFrame(baseline_rows + model_results)
-leaderboard = leaderboard.sort_values("net_profit", ascending=False).reset_index(drop=True)
+leaderboard = pd.DataFrame(baseline_rows + model_results).sort_values("net_profit", ascending=False).reset_index(drop=True)
 
-print(leaderboard)
-
-# Answer / notes:
-# Which model is strongest on validation profit?
-#
-#
+display_cols = ["model", "threshold_default", "auc", "brier", "net_profit",
+                "approval_rate", "approved_default_rate", "runtime_seconds"]
+print("\n=== Validation Leaderboard ===")
+print(leaderboard[[c for c in display_cols if c in leaderboard.columns]].to_string(index=False))
 
 
 #%% 17. Profit curve for finalist model
 
-# After the team chooses one finalist, build the profit curve here.
-# Do not do this before the model comparison is clear.
-
 RUN_PROFIT_CURVE = False
 
 if RUN_PROFIT_CURVE:
-    # Fill these from the chosen model block.
-    # finalist_name = "__________"
-    # finalist_prob_default = __________
-
-    # Sort loans from safest to riskiest.
-    # Approve progressively.
-    # Track cumulative profit.
-    # Choose approval depth that maximizes validation profit.
+    # Fill from the chosen model block.
+    # Sort loans from safest to riskiest. Track cumulative profit.
+    # Find approval depth at max profit.
     pass
-
-# Answer / notes:
-# Final validation policy: approve if P(default) <= ________
-# Approval rate: ________
-# Validation profit: ________
 
 
 #%% 18. ROC, calibration, and error analysis
 
-# These are diagnostic checks after choosing the finalist model.
-# Keep them short and focused.
-
 RUN_DIAGNOSTICS = False
 
 if RUN_DIAGNOSTICS:
-    # ROC: ranking quality.
-    # Calibration: whether predicted probabilities are close to actual default rates.
-    # Error analysis: where approved defaults and denied paid loans happen.
+    # ROC: ranking quality. Calibration: predicted vs actual. Error analysis.
     pass
-
-# Answer / notes:
-#
-#
 
 
 #%% 19. Final untouched test evaluation
@@ -996,32 +881,14 @@ if RUN_DIAGNOSTICS:
 RUN_FINAL_TEST = False
 
 if RUN_FINAL_TEST:
-    # Only run this after the team freezes:
-    # - feature list
-    # - preprocessing choice
-    # - model family
-    # - hyperparameters
-    # - threshold rule
-
-    # Refit finalist model on train + validation.
-    # Evaluate once on test.
-    # Do not tune after seeing test result.
+    # Only run after freezing: features, preprocessing, model, hyperparameters, threshold rule.
+    # Refit on train+validation, evaluate once on test, do not tune.
     pass
-
-# Answer / notes:
-# Final test result:
-#
-#
 
 
 #%% 20. Save outputs
 
-# Save only after the team has real results.
+# leaderboard.to_csv("sba_leaderboard.csv", index=False)
 
-# leaderboard.to_csv("sba_validation_leaderboard.csv", index=False)
-# Add other outputs here:
-# - profit curve table
-# - calibration table
-# - final test result
-
-print("Workflow template finished. Fill model blocks, then save outputs.")
+print("Main Workflow complete. Turn on individual RUN_* flags to run each owner's model blocks.")
+print("Do NOT run RUN_FINAL_TEST yet.")
