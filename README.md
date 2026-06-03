@@ -30,7 +30,7 @@
 | Hai Anh | Logistic/LDA/QDA | 14C | `RUN_LOGIT_DA` |
 | Huyen Anh | Neural Network | 14D | `RUN_NEURAL_NET` |
 
-All teammates use the same 24 numeric + 7 categorical features (shared v1 set).
+All teammates use the same 23 numeric + 7 categorical features (shared v1 set, no DisbursementGross predictor).
 Results are comparable because everyone shares identical train/valid/test splits.
 
 ---
@@ -42,27 +42,27 @@ All results on shared feature set v1, 50,000-row sample, `random_state=1`, 60/20
 Approve-all baseline: **$30,457,862**
 Deny-all baseline: **$0**
 
-## Top 10 (tuned thresholds, validation set only)
+## Top 10 (tuned thresholds, 23 numeric + 7 categorical features, no DisbursementGross predictor)
 
 | # | Model | AUC | Net Profit | Threshold | Approval | Default Rate | Runtime | Owner |
 |---|-------|-----|-----------|-----------|----------|-------------|---------|-------|
-| 1 | **HGB** 250 iter, lr=0.08, leaf=63 | 0.9712 | **$71,253,735** | 0.074 | 72.9% | 1.24% | 10s | Hai An |
-| 2 | HGB 200 iter, lr=0.05, leaf=31 | 0.9705 | $70,369,860 | 0.124 | 74.4% | 1.53% | 7s | Hai An |
-| 3 | HGB 200 iter, lr=0.05, leaf=31 | 0.9705 | $70,022,621 | 0.110 | 73.5% | 1.47% | 32s | Benchmark |
-| 4 | HGB 200 iter, lr=0.03, leaf=31 | 0.9694 | $69,722,523 | 0.154 | 75.7% | 1.82% | 7s | Hai An |
-| 5 | HGB 100 iter, lr=0.05, leaf=31 | 0.9683 | $69,493,734 | 0.164 | 75.9% | 1.98% | 4s | Hai An |
-| 6 | HGB 200 iter, lr=0.05, leaf=15 | 0.9682 | $68,979,210 | 0.184 | 76.7% | 2.10% | 4s | Hai An |
-| 7 | **RF** n=100, depth=16, leaf=25 | 0.9657 | $68,860,349 | 0.203 | 76.1% | 2.16% | 4s | Hai An |
-| 8 | RF n=100, depth=16, leaf=25 | 0.9649 | $68,901,499 | 0.151 | 73.1% | 1.57% | 12s | Benchmark |
-| 9 | RF n=100, depth=12, leaf=25 | 0.9642 | $67,980,630 | 0.138 | 72.4% | 1.64% | 11s | Benchmark |
-| 10 | RF n=100, depth=16, leaf=50 | 0.9617 | $67,738,552 | 0.201 | 74.9% | 2.20% | 10s | Benchmark |
+| 1 | **HGB** 250 iter, lr=0.08, leaf=63 | 0.9704 | **$71,535,187** | 0.104 | 74.9% | 1.48% | 11s | Hai An |
+| 2 | HGB 200 iter, lr=0.05, leaf=31 | 0.9705 | $70,860,641 | 0.124 | 74.3% | 1.53% | 8s | Hai An |
+| 3 | HGB 200 iter, lr=0.03, leaf=31 | 0.9693 | $69,525,823 | 0.188 | 77.2% | 2.14% | 8s | Hai An |
+| 4 | HGB 200 iter, lr=0.05, leaf=15 | 0.9684 | $69,521,320 | 0.094 | 70.2% | 1.32% | 5s | Hai An |
+| 5 | HGB 100 iter, lr=0.05, leaf=31 | 0.9679 | $69,195,918 | 0.169 | 76.1% | 2.06% | 4s | Hai An |
+| 6 | **RF** n=100, depth=16, leaf=25 | 0.9659 | $68,839,653 | 0.159 | 73.7% | 1.70% | 4s | Hai An |
+| 7 | RF n=100, depth=16, leaf=50 | 0.9628 | $67,825,944 | 0.198 | 74.8% | 2.09% | 3s | Hai An |
+| 8 | RF n=200, depth=16, leaf=50 | 0.9628 | $67,562,577 | 0.213 | 75.5% | 2.28% | 6s | Hai An |
+| 9 | Bagging n=100, d=16, leaf=50 | 0.9608 | $67,256,513 | 0.184 | 73.8% | 2.06% | 5s | Hai An |
+| 10 | **NN** (128,64,32), α=0.01 | 0.9177 | $60,297,144 | 0.069 | 67.5% | 3.19% | 3s | Huyen Anh |
 
 ## Best per Family
 
 | Family | Model | Profit | AUC | Owner |
 |--------|-------|--------|-----|-------|
-| **HGB** | 250 iter, lr=0.08, leaf=63 | **$71,253,735** | 0.9712 | Hai An |
-| Random Forest | n=100, depth=16, leaf=25 | $68,860,349 | 0.9657 | Hai An |
+| **HGB** | 250 iter, lr=0.08, leaf=63 | **$71,535,187** | 0.9704 | Hai An |
+| Random Forest | n=100, depth=16, leaf=25 | $68,839,653 | 0.9659 | Hai An |
 | Decision Tree | depth=16, leaf=50 | $66,913,274 | 0.9516 | Hai An |
 | Neural Network | (128,64,32), α=0.01 | $60,893,607 | 0.9190 | Huyen Anh |
 | AdaBoost | depth=2, leaf=200 | $55,092,816 | 0.9054 | Hai An |
@@ -78,5 +78,5 @@ Deny-all baseline: **$0**
 3. **NN is competitive** — AUC 0.919 but conservative threshold limits profit.
 4. **Logistic is solid** — Ridge C=10.0 at $50.4M is predictable and explainable.
 5. **`max_features=None` always wins** — every feature contributes to tree models.
-6. **v1 features matter** — upgrading from old 17-feature set to full 24-feature v1 added ~$3M to HGB.
+6. **Feature count: 23 numeric + 7 categorical** — `log_DisbursementGross` removed (DisbursementGross is post-approval leakage).
 7. **All 3 teammate files are cross-reproducible** — identical splits, features, scoring.

@@ -107,7 +107,8 @@ USE_DISBURSEMENT_AS_PREDICTOR = False
 df_model = df.drop(columns=leakage_cols + id_text_cols, errors="ignore").copy()
 print("Model dataframe shape:", df_model.shape)
 
-# Notes: DisbursementGross kept for profit calculation and log transform.
+# Notes: DisbursementGross is used only for profit calculation, not as a predictor,
+# because it is the amount disbursed after approval/funding — it would be leakage.
 # It is NOT added as a raw predictor unless USE_DISBURSEMENT_AS_PREDICTOR = True.
 
 
@@ -242,7 +243,7 @@ df_model["LowDoc_clean"] = clean_yes_no(df_model["LowDoc"])
 df_model["RevLineCr_clean"] = clean_yes_no(df_model["RevLineCr"])
 
 # 7.8 Log transforms
-for col in ["GrAppv", "SBA_Appv", "NoEmp", "DisbursementGross"]:
+for col in ["GrAppv", "SBA_Appv", "NoEmp"]:
     if col in df_model.columns:
         df_model[f"log_{col}"] = np.log1p(df_model[col])
 
@@ -258,7 +259,7 @@ df_model[float_cols] = df_model[float_cols].replace([np.inf, -np.inf], np.nan)
 print("df_model shape:", df_model.shape)
 
 
-#%% 8. Register predictors — feature set v1 (24 numeric + 7 categorical)
+#%% 8. Register predictors — feature set v1 (23 numeric + 7 categorical)
 
 numeric_cols = [
     "Term", "NoEmp", "CreateJob", "RetainedJob", "GrAppv", "SBA_Appv",
@@ -266,7 +267,7 @@ numeric_cols = [
     "jobs_total", "jobs_per_dollar", "same_state_bank",
     "RealEstate", "Recession", "approval_year", "disbursement_year",
     "ApprovalFY_clean", "log_GrAppv", "log_SBA_Appv", "log_NoEmp",
-    "log_DisbursementGross", "RealEstate_x_Portion",
+    "RealEstate_x_Portion",
     "Recession_x_Portion", "Recession_x_RealEstate",
 ]
 
