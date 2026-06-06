@@ -1,22 +1,4 @@
-# -*- coding: utf-8 -*-
-"""
-SBA Final Project — Main Workflow (Uniform Version)
-Shared feature set v1 — all teammates use identical features, split, and scoring.
 
-Owners:
-  Hai An   — KNN, Tree-family (DT/Bagging/RF/AdaBoost/HGB)
-  Hai Anh  — Logistic Regression, LDA, QDA
-  Huyen Anh — Neural Network
-
-Shared variables (do not rename):
-  df_model, y, amount, numeric_cols, categorical_cols
-  X_train, X_valid, X_test, y_train, y_valid, y_test
-  amount_train, amount_valid, amount_test
-  preprocess_scaled, preprocess_scaled_dense, preprocess_tree, preprocess_hgb
-  fit_predict_evaluate(), evaluate_prob_model(), tune_threshold_by_profit()
-
-Dataset: SBAnational.csv
-"""
 
 #%% 1. Import libraries
 
