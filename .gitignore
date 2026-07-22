@@ -1,9 +1,12 @@
 # Data files
+SBAnational.csv
 *.csv
 *.xlsx
 *.xls
 *.parquet
 data/
+external_data_cache/
+research_outputs/
 
 # Model artifacts and binary arrays
 *.pkl
@@ -16,6 +19,19 @@ artifacts/
 # Generated outputs and logs
 outputs/
 logs/
+*.log
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.nav
+*.out
+*.run.xml
+*.snm
+*.synctex.gz
+*.toc
 
 # Local environment and secrets
 .env
@@ -30,3 +46,30 @@ __pycache__/
 # Notebook and OS metadata
 .ipynb_checkpoints/
 .DS_Store
+
+# Local scratch/export folders
+Paper and presentation/
+paper_extracts/
+report_package/
+split_notebooks/
+submission_latex_package_20260722/
+tmp_report7_pages/
+
+# Root-level local scratch files; final curated copies live under reports/ and notebooks/
+/*.ipynb
+/*.json
+/*.pdf
+/*.png
+/*.py
+/*.txt
+/Group2_LaTeX_Source_Package_20260722.zip
+
+# Root-level working notes and audits
+/AUDIT*.md
+/CURRENT_*.md
+/FINAL_PROJECT_REPORT.md
+/LITERATURE_REVIEW_OUTLINE.md
+/baseline_eda_summary.md
+/full_baseline_eda_report.md
+/huyen_anh_hypothesis_report_template.md
+/report_presentation_audit_*.md

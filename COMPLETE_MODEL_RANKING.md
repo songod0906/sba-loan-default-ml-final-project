@@ -1,61 +1,70 @@
-# Complete Model Ranking — SBA Loan Default Project
+# Complete Model Ranking
 
-All results on shared feature set v1 (23 numeric + 7 categorical).
-50,000-row sample, `random_state=1`, 60/20/20 split.
-**Updated 2026-06-03: log_DisbursementGross removed (DisbursementGross is post-approval leakage).**
+Canonical benchmark from the final workflow and paper source-of-truth files.
 
-Approve-all baseline: **$30,457,862**
-Deny-all baseline: **$0**
+## Final Selected Model
 
----
+| Model | Split | Net profit | AUC | Brier | Cutoff | Approval rate | Approved default rate | ROI |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| Optuna LightGBM `n418 nl194` | Validation | $1,096.4M | 0.9827 | 0.0335 | 0.1488 | 77.8% | 1.09% | 4.70% |
+| Optuna LightGBM `n418 nl194` | Test | $1,358.3M | 0.9826 | 0.0339 | 0.1488 | 77.7% | 1.11% | 4.67% |
 
-## Top 10 (tuned thresholds, validation set only)
+The Optuna model is the final model. The manual LightGBM run remains the benchmark-board winner before focused tuning.
 
-| # | Model | AUC | Net Profit | Threshold | Approval | Default Rate | Runtime | Owner |
-|---|-------|-----|-----------|-----------|----------|-------------|---------|-------|
-| 1 | **HGB** 250 iter, lr=0.08, leaf=63 | 0.9704 | **$71,535,187** | 0.104 | 74.9% | 1.48% | 11s | Hai An |
-| 2 | HGB 200 iter, lr=0.05, leaf=31 | 0.9705 | $70,860,641 | 0.124 | 74.3% | 1.53% | 8s | Hai An |
-| 3 | HGB 200 iter, lr=0.03, leaf=31 | 0.9693 | $69,525,823 | 0.188 | 77.2% | 2.14% | 8s | Hai An |
-| 4 | HGB 200 iter, lr=0.05, leaf=15 | 0.9684 | $69,521,320 | 0.094 | 70.2% | 1.32% | 5s | Hai An |
-| 5 | HGB 100 iter, lr=0.05, leaf=31 | 0.9679 | $69,195,918 | 0.169 | 76.1% | 2.06% | 4s | Hai An |
-| 6 | **RF** n=100, depth=16, leaf=25 | 0.9659 | $68,839,653 | 0.159 | 73.7% | 1.70% | 4s | Hai An |
-| 7 | RF n=100, depth=16, leaf=50 | 0.9628 | $67,825,944 | 0.198 | 74.8% | 2.09% | 3s | Hai An |
-| 8 | RF n=200, depth=16, leaf=50 | 0.9628 | $67,562,577 | 0.213 | 75.5% | 2.28% | 6s | Hai An |
-| 9 | Bagging n=100, d=16, leaf=50 | 0.9608 | $67,256,513 | 0.184 | 73.8% | 2.06% | 5s | Hai An |
-| 10 | **NN** (128,64,32), α=0.01 | 0.9177 | $60,297,144 | 0.069 | 67.5% | 3.19% | 3s | Huyen Anh |
+## Manual Benchmark Board
 
-## Best per Family
+| Rank | Model | Family | Validation profit | AUC | Brier | Cutoff | Approval rate | Approved default rate |
+|---:|---|---|---:|---:|---:|---:|---:|---:|
+| 1 | LGB n300 nl127 | LightGBM | $1,078.6M | 0.9814 | 0.0351 | 0.1934 | 78.6% | 1.39% |
+| 2 | LGB n300 nl63 | LightGBM | $1,072.3M | 0.9803 | 0.0365 | 0.1786 | 77.9% | 1.35% |
+| 3 | Bagging n100 | Bagging | $1,062.3M | 0.9774 | 0.0399 | 0.1736 | 76.9% | 1.31% |
+| 4 | XGB n300 d10 | XGBoost | $1,058.1M | 0.9793 | 0.0367 | 0.1439 | 77.1% | 1.29% |
+| 5 | LGB n200 nl31 | LightGBM | $1,055.1M | 0.9772 | 0.0399 | 0.1587 | 76.4% | 1.32% |
+| 6 | XGB n200 d8 | XGBoost | $1,045.5M | 0.9770 | 0.0393 | 0.1637 | 76.9% | 1.46% |
+| 7 | HGB i300 d63 | HGB | $1,044.4M | 0.9776 | 0.0388 | 0.1835 | 77.9% | 1.61% |
+| 8 | HGB i200 d31 | HGB | $1,032.2M | 0.9745 | 0.0420 | 0.1667 | 76.5% | 1.57% |
+| 9 | AdaBoost n100 | AdaBoost | $1,020.0M | 0.9712 | 0.1561 | 0.4562 | 75.9% | 1.71% |
+| 10 | MLP 256x128x64x32 | MLP | $978.5M | 0.9595 | 0.0514 | 0.0992 | 75.3% | 2.24% |
+| 11 | MLP 256x128x64 | MLP | $972.3M | 0.9573 | 0.0527 | 0.1667 | 77.3% | 2.68% |
+| 12 | MLP 128x64x32 | MLP | $970.9M | 0.9580 | 0.0521 | 0.1240 | 76.1% | 2.42% |
+| 13 | RF n100 d16 l25 | Random Forest | $947.2M | 0.9541 | 0.0592 | 0.1667 | 73.2% | 2.23% |
+| 14 | RF n100 d16 l50 | Random Forest | $936.0M | 0.9521 | 0.0606 | 0.1538 | 71.5% | 2.10% |
+| 15 | RF n200 d16 l50 | Random Forest | $934.8M | 0.9520 | 0.0608 | 0.1538 | 71.5% | 2.10% |
+| 16 | Ridge C1 | Logistic | $791.4M | 0.8745 | 0.0899 | 0.2232 | 72.9% | 5.08% |
+| 17 | Ridge C10 | Logistic | $791.3M | 0.8745 | 0.0898 | 0.2232 | 73.0% | 5.07% |
+| 18 | Ridge C0.1 | Logistic | $790.8M | 0.8745 | 0.0899 | 0.2182 | 72.4% | 4.99% |
+| 19 | LDA | LDA | $769.3M | 0.8606 | 0.0959 | 0.2083 | 71.6% | 5.62% |
+| 20 | QDA r0.1 | QDA | $697.4M | 0.7944 | 0.1873 | 0.0893 | 57.8% | 6.01% |
+| 21 | QDA r0.2 | QDA | $693.0M | 0.7887 | 0.1745 | 0.1042 | 59.0% | 6.23% |
 
-| Family | Model | Profit | AUC | Owner |
-|--------|-------|--------|-----|-------|
-| **HGB** | 250 iter, lr=0.08, leaf=63 | **$71,535,187** | 0.9704 | Hai An |
-| Random Forest | n=100, depth=16, leaf=25 | $68,839,653 | 0.9659 | Hai An |
-| Neural Network | (128,64,32), α=0.01 | $60,297,144 | 0.9177 | Huyen Anh |
-| AdaBoost | depth=2, leaf=200 | $55,092,816 | 0.9054 | Hai An |
-| KNN | k=51, distance | $54,329,264 | 0.8620 | Hai An |
-| Logistic Ridge | C=1.0 | $51,436,742 | 0.8402 | Hai Anh |
-| LDA | lsqr, shrinkage=auto | $50,135,737 | 0.8169 | Hai Anh |
-| QDA | reg=0.2 | $44,469,480 | 0.8027 | Hai Anh |
+## External-Feature Result
 
-## Full Logistic/LDA/QDA Ranking
+| Stage | Features | Validation profit | AUC | Brier | Cutoff | Approval rate | Approved default rate | ROI |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| SBA-only Optuna LightGBM | 16 | $1,087.9M | 0.9809 | 0.0355 | 0.1687 | 78.1% | 1.26% | 4.64% |
+| SBA + external, no interactions | 31 | $1,093.4M | 0.9825 | 0.0337 | 0.1637 | 78.2% | 1.21% | 4.65% |
+| SBA + external + interactions | 44 | $1,096.4M | 0.9827 | 0.0335 | 0.1488 | 77.8% | 1.09% | 4.70% |
 
-| Model | Profit | AUC | Threshold | Approval |
-|-------|--------|-----|-----------|----------|
-| Ridge C=1.0 | $51,436,742 | 0.8402 | 0.223 | 71.6% |
-| ElasticNet | $51,369,208 | 0.8400 | 0.218 | 70.8% |
-| Ridge C=10.0 | $51,131,084 | 0.8400 | 0.223 | 71.5% |
-| Lasso C=0.5 | $51,125,943 | 0.8398 | 0.213 | 70.3% |
-| Lasso C=0.1 | $51,096,975 | 0.8376 | 0.263 | 75.5% |
-| Ridge C=0.1 | $51,037,368 | 0.8397 | 0.193 | 67.3% |
-| LDA | $50,135,737 | 0.8169 | 0.169 | 62.6% |
-| QDA reg=0.2 | $44,469,480 | 0.8027 | 0.139 | 61.3% |
+External features improve validation profit by `$8.5M` over the SBA-only Optuna LightGBM and reduce the approved default rate from `1.26%` to `1.09%`.
 
-## Key Observations
+## Robustness Summary
 
-1. **HGB dominates** — all top 5 spots. Removing `log_DisbursementGross` had minimal impact (actually improved $71.3M → $71.5M).
-2. **RF is strong** — depth=16/leaf=25 is the sweet spot.
-3. **NN slightly drops** — from $60.9M to $60.3M without log_DisbursementGross.
-4. **Logistic improves** — Ridge from $50.4M to $51.4M without the post-approval feature.
-5. **DisbursementGross is correctly excluded** — it is the amount disbursed after approval/funding, and using it (even log-transformed) would be leakage.
-6. **Feature count: 23 numeric + 7 categorical** — down from 24 numeric.
-7. **All teammate files are cross-reproducible** — identical splits, features, scoring.
+| Check | Result |
+|---|---|
+| Multi-seed | Optuna LightGBM averages `$1,091.7M +/- $4.1M` |
+| Era-forward | Pre-to-crisis AUC `0.960`; pre+crisis-to-post AUC `0.970` |
+| Profit sensitivity | Rule remains profitable across five default-loss assumptions |
+| Year ablation | Removing year fields changes profit by about `-$1.1M` and AUC by `-0.0006` |
+| Calibration | Calibration changes profit by less than `$1M` near the chosen cutoff |
+
+## Profit Rule
+
+The ranking is based on validation net profit after threshold tuning:
+
+| Decision | Actual outcome | Profit |
+|---|---|---:|
+| Approve | Paid in full | `+5% * DisbursementGross` |
+| Approve | Default | `-25% * DisbursementGross` |
+| Deny | Any outcome | `$0` |
+
+`DisbursementGross` is excluded from the feature matrix and used only for profit weighting.
