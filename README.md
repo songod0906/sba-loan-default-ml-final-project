@@ -73,6 +73,7 @@ The modeling code excludes outcome and post-approval fields before training:
 | `Main Workflow.py` | Main modeling workflow used for the project |
 | `notebooks/final_workflow.ipynb` | Final notebook version for review |
 | `reports/` | Final paper, presentation, and LaTeX source package |
+| `TECHNICAL_DOCUMENT.md` | ASD-STE100-style technical description and operating instructions |
 | `COMPLETE_MODEL_RANKING.md` | Canonical model leaderboard and final metric summary |
 | `CONTRIBUTION_STATEMENT.md` | Team contribution percentages |
 
@@ -84,6 +85,7 @@ The raw SBA dataset is not committed because of size. To rerun locally, place `S
 
 ## Final Deliverables
 
+- [Technical description and operating instructions](TECHNICAL_DOCUMENT.md)
 - [Research paper](reports/Group%202%20ML%20Final%20Project%20Research%20Paper.pdf)
 - [Presentation deck](reports/Group%202%20ML%20Final%20Project%20Presentation.pdf)
 - [LaTeX source package](reports/Group2_LaTeX_Source_Package_20260722.zip)
