@@ -1,22 +1,26 @@
 # Group 2 Contribution Statement
 
-Suggested contribution percentages:
+This file gives the final team contribution record.
 
-| Member | Contribution | Main responsibilities |
+| Team member | Contribution | Primary work |
 |---|---:|---|
-| Nguyen Hoang Son | 40% | Project integration, literature review, methodology, final model/result interpretation, profit-based approval rule, paper/presentation finalization |
-| Chu Hai An | 20% | Industry/business-environment EDA, tree-family models including KNN/RF/Bagging/AdaBoost/HGB, model comparison support |
-| Nguyen Ngoc Hai Anh | 20% | Borrower-fragility and macro-stress EDA, logistic regression/LDA/QDA modeling, local-economy feature interpretation |
-| Vu Nguyen Huyen Anh | 20% | Geography/disaster/tourism EDA, neural-network modeling, disaster/hurricane feature interpretation |
+| Nguyen Hoang Son | 40% | Project integration, literature review, method, final model analysis, profit rule, paper, and presentation |
+| Chu Hai An | 20% | Industry analysis, business-environment analysis, tree models, and model comparison |
+| Nguyen Ngoc Hai Anh | 20% | Borrower analysis, economic-stress analysis, linear models, and discriminant models |
+| Vu Nguyen Huyen Anh | 20% | Geography analysis, disaster analysis, tourism analysis, and neural-network models |
 
-Total: 100%
+The total contribution is 100%.
 
-Basis for allocation:
+## Allocation Basis
 
-- The workflow and notebook assign EDA and model blocks by owner.
-- Son handled the integrated final write-up and result narrative.
-- Hai An owned the largest model-family block and industry/housing EDA.
-- Hai Anh owned local-economy/fragility EDA and linear/discriminant models.
-- Huyen Anh owned disaster/geography EDA and neural-network models.
+The workflow and notebook assign analysis and model work to each team member.
 
-The three teammate shares are equal, while Son's share is larger to reflect final integration and submission responsibility.
+Nguyen Hoang Son integrated the project. He also completed the final result text and submission files.
+
+Chu Hai An completed the largest model-family group. He also completed the industry and housing analysis.
+
+Nguyen Ngoc Hai Anh completed the local-economy analysis. She also completed the linear and discriminant models.
+
+Vu Nguyen Huyen Anh completed the disaster and geography analysis. She also completed the neural-network models.
+
+The three teammate shares are equal. Nguyen Hoang Son has the larger share because he completed the final integration.

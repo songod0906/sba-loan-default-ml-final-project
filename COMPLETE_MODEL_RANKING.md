@@ -1,19 +1,25 @@
 # Complete Model Ranking
 
-Canonical benchmark from the final workflow and paper source-of-truth files.
+This file gives the canonical model results.
 
-## Final Selected Model
+The final workflow and `PAPER_TRUTH.json` supply the result values.
 
-| Model | Split | Net profit | AUC | Brier | Cutoff | Approval rate | Approved default rate | ROI |
+## Selected Model
+
+The project selected the Optuna LightGBM model.
+
+| Model | Dataset | Net profit | AUC | Brier score | Decision cutoff | Approval rate | Approved default rate | ROI |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
 | Optuna LightGBM `n418 nl194` | Validation | $1,096.4M | 0.9827 | 0.0335 | 0.1488 | 77.8% | 1.09% | 4.70% |
 | Optuna LightGBM `n418 nl194` | Test | $1,358.3M | 0.9826 | 0.0339 | 0.1488 | 77.7% | 1.11% | 4.67% |
 
-The Optuna model is the final model. The manual LightGBM run remains the benchmark-board winner before focused tuning.
+The manual LightGBM model had the best result before the focused Optuna search.
 
-## Manual Benchmark Board
+## Manual Model Ranking
 
-| Rank | Model | Family | Validation profit | AUC | Brier | Cutoff | Approval rate | Approved default rate |
+The table ranks each manual model by validation net profit.
+
+| Rank | Model | Model family | Validation profit | AUC | Brier score | Decision cutoff | Approval rate | Approved default rate |
 |---:|---|---|---:|---:|---:|---:|---:|---:|
 | 1 | LGB n300 nl127 | LightGBM | $1,078.6M | 0.9814 | 0.0351 | 0.1934 | 78.6% | 1.39% |
 | 2 | LGB n300 nl63 | LightGBM | $1,072.3M | 0.9803 | 0.0365 | 0.1786 | 77.9% | 1.35% |
@@ -37,34 +43,45 @@ The Optuna model is the final model. The manual LightGBM run remains the benchma
 | 20 | QDA r0.1 | QDA | $697.4M | 0.7944 | 0.1873 | 0.0893 | 57.8% | 6.01% |
 | 21 | QDA r0.2 | QDA | $693.0M | 0.7887 | 0.1745 | 0.1042 | 59.0% | 6.23% |
 
-## External-Feature Result
+## External Feature Result
 
-| Stage | Features | Validation profit | AUC | Brier | Cutoff | Approval rate | Approved default rate | ROI |
+The table shows the effect of each feature group.
+
+| Feature group | Feature count | Validation profit | AUC | Brier score | Decision cutoff | Approval rate | Approved default rate | ROI |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| SBA-only Optuna LightGBM | 16 | $1,087.9M | 0.9809 | 0.0355 | 0.1687 | 78.1% | 1.26% | 4.64% |
-| SBA + external, no interactions | 31 | $1,093.4M | 0.9825 | 0.0337 | 0.1637 | 78.2% | 1.21% | 4.65% |
-| SBA + external + interactions | 44 | $1,096.4M | 0.9827 | 0.0335 | 0.1488 | 77.8% | 1.09% | 4.70% |
+| SBA data | 16 | $1,087.9M | 0.9809 | 0.0355 | 0.1687 | 78.1% | 1.26% | 4.64% |
+| SBA and external data | 31 | $1,093.4M | 0.9825 | 0.0337 | 0.1637 | 78.2% | 1.21% | 4.65% |
+| SBA, external, and interaction data | 44 | $1,096.4M | 0.9827 | 0.0335 | 0.1488 | 77.8% | 1.09% | 4.70% |
 
-External features improve validation profit by `$8.5M` over the SBA-only Optuna LightGBM and reduce the approved default rate from `1.26%` to `1.09%`.
+The full feature set increased validation profit by approximately `$8.5M`.
 
-## Robustness Summary
+The full feature set decreased the approved default rate from `1.26%` to `1.09%`.
+
+## Robustness Results
 
 | Check | Result |
 |---|---|
-| Multi-seed | Optuna LightGBM averages `$1,091.7M +/- $4.1M` |
-| Era-forward | Pre-to-crisis AUC `0.960`; pre+crisis-to-post AUC `0.970` |
-| Profit sensitivity | Rule remains profitable across five default-loss assumptions |
-| Year ablation | Removing year fields changes profit by about `-$1.1M` and AUC by `-0.0006` |
-| Calibration | Calibration changes profit by less than `$1M` near the chosen cutoff |
+| Multiple random seeds | Mean profit was `$1,091.7M`, with a standard deviation of `$4.1M` |
+| Era-forward test | Pre-to-crisis AUC was `0.960` |
+| Era-forward test | Pre-and-crisis-to-post AUC was `0.970` |
+| Profit sensitivity | The model had a positive profit for five default-loss assumptions |
+| Year removal | Profit decreased by approximately `$1.1M`, and AUC decreased by `0.0006` |
+| Calibration | Calibration changed profit by less than `$1M` near the decision cutoff |
 
 ## Profit Rule
 
-The ranking is based on validation net profit after threshold tuning:
+The validation set selects the model and the decision cutoff.
 
-| Decision | Actual outcome | Profit |
+| Decision | Actual outcome | Profit value |
 |---|---|---:|
-| Approve | Paid in full | `+5% * DisbursementGross` |
-| Approve | Default | `-25% * DisbursementGross` |
-| Deny | Any outcome | `$0` |
+| Approve | Paid in full | `+5% × DisbursementGross` |
+| Approve | Default | `-25% × DisbursementGross` |
+| Deny | Paid in full or default | `$0` |
 
-`DisbursementGross` is excluded from the feature matrix and used only for profit weighting.
+The profit calculation uses `DisbursementGross`. The feature matrix does not contain this field.
+
+## Result Control
+
+Do not change a result value without a source-of-truth check.
+
+Use `PAPER_TRUTH.json` in the LaTeX source package for this check.

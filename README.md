@@ -1,93 +1,156 @@
 # SBA Loan Default Prediction
 
-Profit-based machine learning project for SBA loan approval decisions. The project compares classical models, tree ensembles, neural networks, external economic context, and Optuna-tuned LightGBM under a business objective: approve loans only when the expected lending profit is positive.
+This project estimates the default probability for an SBA loan.
 
-## Final Result
+The project uses validation net profit to select the model and the decision cutoff.
 
-The final model is an Optuna-tuned LightGBM classifier using approval-time SBA features plus selected external context.
+## Important Use Limit
 
-| Split | Net profit | AUC | Brier | Approval rate | Approved default rate | ROI |
+**IMPORTANT:** Do not use this model for a real loan decision.
+
+This model is a course project and a portfolio artifact. It is not a production lending system.
+
+A production system must include legal review, fairness tests, decision explanations, drift monitoring, and manual review.
+
+## Final Model
+
+The final model is an Optuna-tuned LightGBM classifier. It uses 44 features that were available before loan approval.
+
+| Dataset | Net profit | AUC | Brier score | Approval rate | Approved default rate | ROI |
 |---|---:|---:|---:|---:|---:|---:|
 | Validation | $1,096.4M | 0.9827 | 0.0335 | 77.8% | 1.09% | 4.70% |
 | Test | $1,358.3M | 0.9826 | 0.0339 | 77.7% | 1.11% | 4.67% |
 
-Final decision cutoff: approve when predicted default probability is below `0.1488`.
+The decision cutoff is `0.1488`.
 
-## Business Rule
+- Approve the loan when the default probability is less than or equal to the cutoff.
+- Deny the loan when the default probability is more than the cutoff.
 
-The evaluation optimizes validation profit, not ROC AUC alone.
+## Profit Rule
 
-| Decision | Actual outcome | Profit rule |
+The project uses this retrospective profit rule:
+
+| Decision | Actual outcome | Profit value |
 |---|---|---:|
-| Approve | Paid in full | `+5% * DisbursementGross` |
-| Approve | Default | `-25% * DisbursementGross` |
-| Deny | Any outcome | `$0` |
+| Approve | Paid in full | `+5% × DisbursementGross` |
+| Approve | Default | `-25% × DisbursementGross` |
+| Deny | Paid in full or default | `$0` |
 
-`DisbursementGross` is used only to calculate retrospective profit. It is not used as a model predictor.
+The profit calculation uses `DisbursementGross`. The model does not use this field as a predictor.
 
-## Modeling Scope
+## Model Scope
 
-The workflow evaluates a mix of model families:
+The workflow compares these model families:
 
-| Family | Examples |
+| Model family | Models |
 |---|---|
-| Linear / discriminant | Ridge logistic regression, LDA, QDA |
-| Tree ensembles | Random Forest, Bagging, AdaBoost, HistGradientBoosting |
-| Boosting | XGBoost, LightGBM |
-| Neural network | MLP |
-| Tuning | Optuna profit-based LightGBM |
+| Linear and discriminant | Ridge logistic regression, LDA, and QDA |
+| Tree ensemble | Random Forest, Bagging, AdaBoost, and HistGradientBoosting |
+| Boosting | XGBoost and LightGBM |
+| Neural network | Multilayer perceptron |
+| Model tuning | Optuna with a LightGBM model |
 
-The final model uses 44 pre-approval features: 37 numeric and 7 categorical fields before encoding.
+The final input has 37 numeric features and 7 categorical features. One-hot encoding makes 183 model columns.
 
 ## External Data
 
-External data is merged only when it is observable at or before the loan approval period. The goal is not to leak future outcomes, but to test whether the SBA application becomes stronger when local economic context is added.
+The workflow uses external data only when the data was available at or before the approval period.
 
-| Block | Purpose |
+| Data source | Data purpose |
 |---|---|
-| BLS unemployment | State labor-market stress |
-| BLS QCEW | State-industry employment and wage conditions |
-| FHFA HPI | Housing-market weakness |
-| FEMA disasters | Local shock exposure |
-| Census CBP | Local industry thickness |
-| Engineered interactions | Housing, disaster, industry, and small-firm risk stacks |
+| BLS unemployment | State labor market condition |
+| BLS QCEW | State and industry employment conditions |
+| FHFA HPI | Housing market condition |
+| FEMA | Disaster exposure |
+| Census CBP | Local industry condition |
+| Engineered interactions | Combined economic and borrower conditions |
 
-The final comparison found that external features improved the Optuna LightGBM validation profit from `$1,087.9M` to `$1,096.4M`, a lift of about `$8.5M`. The larger value of the external block is interpretability: it helps explain which local stress channels matter around the approval decision.
+External features increased validation profit from `$1,087.9M` to `$1,096.4M`. The increase was approximately `$8.5M`.
 
-## Leakage Controls
+## Data Leakage Controls
 
-The modeling code excludes outcome and post-approval fields before training:
+The model excludes outcome data and post-approval data.
 
 | Excluded field | Reason |
 |---|---|
-| `MIS_Status` | Target label |
-| `ChgOffDate` | Observed after charge-off |
-| `ChgOffPrinGr` | Observed after charge-off |
-| `BalanceGross` | Post-approval balance information |
-| `DisbursementGross` | Kept only for profit weighting, not prediction |
+| `MIS_Status` | Contains the target outcome |
+| `ChgOffDate` | Occurs after a charge-off |
+| `ChgOffPrinGr` | Occurs after a charge-off |
+| `BalanceGross` | Contains post-approval balance data |
+| `DisbursementGross` | Supplies only the retrospective profit value |
 
-## Repository Structure
+The workflow keeps the test set separate during model selection. The validation set selects the decision cutoff.
 
-| Path | Contents |
+## Repository Contents
+
+| Path | Content |
 |---|---|
-| `Main Workflow.py` | Main modeling workflow used for the project |
-| `notebooks/final_workflow.ipynb` | Final notebook version for review |
+| `Main Workflow.py` | Main analysis and model workflow |
+| `notebooks/final_workflow.ipynb` | Final notebook and selected model |
+| `notebooks/README.md` | Notebook operating information |
 | `reports/` | Final paper, presentation, and LaTeX source package |
-| `COMPLETE_MODEL_RANKING.md` | Canonical model leaderboard and final metric summary |
-| `CONTRIBUTION_STATEMENT.md` | Team contribution percentages |
+| `reports/README.md` | Report package information |
+| `COMPLETE_MODEL_RANKING.md` | Model results and robustness checks |
+| `CONTRIBUTION_STATEMENT.md` | Team contribution record |
 
-Large local files are intentionally excluded from GitHub: raw SBA data, external-data caches, parquet merges, temporary research outputs, and LaTeX build artifacts.
+The repository excludes raw data, external-data caches, temporary outputs, and LaTeX build files.
 
-## Reproducibility Notes
+## Operating Procedure
 
-The raw SBA dataset is not committed because of size. To rerun locally, place `SBAnational.csv` in the project root and use the final notebook or main workflow. External merged artifacts can be regenerated from the workflow scripts, but the portfolio repository keeps only final deliverables and source code.
+### Run the final notebook in Google Colab
+
+1. Open `notebooks/final_workflow.ipynb` in Google Colab.
+
+2. Read the instruction in each cell.
+
+3. Run the cells in sequence.
+
+4. Run the enriched dataset download cell.
+
+5. Stop if a cell gives an error.
+
+6. Correct the error before you continue.
+
+7. Keep the test set protected until you freeze the model and cutoff.
+
+### Run the main workflow on a local computer
+
+1. Make a Python 3 environment.
+
+2. Install the necessary packages.
+
+   ```text
+   pip install numpy pandas matplotlib scikit-learn lightgbm xgboost optuna pyarrow
+   ```
+
+3. Put an enriched dataset in a permitted local path.
+
+4. Use `research_outputs/sba_enriched_eda_dataset.parquet` when this path is available.
+
+5. Open `Main Workflow.py`.
+
+6. Review each `RUN_...` control.
+
+7. Set only the necessary controls to `True`.
+
+8. Run the workflow by section.
+
+9. Do not run the final test during model selection.
+
+The repository does not supply the enriched dataset or a locked package environment.
 
 ## Final Deliverables
 
 - [Research paper](reports/Group%202%20ML%20Final%20Project%20Research%20Paper.pdf)
-- [Presentation deck](reports/Group%202%20ML%20Final%20Project%20Presentation.pdf)
+- [Presentation](reports/Group%202%20ML%20Final%20Project%20Presentation.pdf)
 - [LaTeX source package](reports/Group2_LaTeX_Source_Package_20260722.zip)
+- [Complete model ranking](COMPLETE_MODEL_RANKING.md)
+- [Contribution statement](CONTRIBUTION_STATEMENT.md)
 
-## Ethics and Use
+## Writing Standard
 
-This is a course project and portfolio artifact, not a production lending system. A real deployment would require compliance review, fairness testing, adverse-action explanation, monitoring for drift, and manual review for borderline decisions.
+The repository documentation applies the writing principles from [ASD-STE100 Issue 9](https://www.asd-ste100.org/assets/files/ASD-STE100_ISSUE9.pdf).
+
+The documentation uses controlled project terms, short sentences, active voice, and one action in each procedure step.
+
+An approved STE checker did not certify the documentation.
